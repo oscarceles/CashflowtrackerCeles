@@ -30,24 +30,52 @@ const primaryBtn = {
   fontWeight: 600,
   cursor: "pointer",
 };
+const linkBtn = {
+  background: "none",
+  border: "none",
+  color: T.blue,
+  fontSize: 12,
+  cursor: "pointer",
+  padding: 0,
+  textAlign: "left",
+};
+
 function LoginForm({ banner }) {
+  const [authMethod, setAuthMethod] = useState("magic"); // "magic" | "password"
+  const [passwordMode, setPasswordMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
 
+  function resetFeedback() {
+    setError(null);
+    setMessage(null);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
-    setMessage(null);
+    resetFeedback();
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.origin },
-      });
-      if (error) throw error;
-      setMessage("Revisa tu correo: te enviamos un enlace para entrar.");
+      if (authMethod === "magic") {
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        setMessage("Revisa tu correo: te enviamos un enlace para entrar.");
+      } else if (passwordMode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        if (data.user && !data.session) {
+          setMessage("Revisa tu correo para confirmar la cuenta antes de entrar.");
+        }
+      }
     } catch (err) {
       setError(err.message || "Error de autenticación.");
     } finally {
@@ -91,10 +119,52 @@ function LoginForm({ banner }) {
             onChange={(e) => setEmail(e.target.value)}
             style={inputStyle}
           />
+          {authMethod === "password" && (
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={inputStyle}
+            />
+          )}
           <button type="submit" disabled={busy} style={primaryBtn}>
-            {busy ? "..." : "Enviar enlace de acceso"}
+            {busy
+              ? "..."
+              : authMethod === "magic"
+              ? "Enviar enlace de acceso"
+              : passwordMode === "signin"
+              ? "Entrar"
+              : "Crear cuenta"}
           </button>
         </form>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+          <button
+            type="button"
+            style={linkBtn}
+            onClick={() => {
+              setAuthMethod(authMethod === "magic" ? "password" : "magic");
+              resetFeedback();
+            }}
+          >
+            {authMethod === "magic" ? "¿Prefieres usar contraseña?" : "¿Prefieres usar un enlace mágico?"}
+          </button>
+          {authMethod === "password" && (
+            <button
+              type="button"
+              style={linkBtn}
+              onClick={() => {
+                setPasswordMode(passwordMode === "signin" ? "signup" : "signin");
+                resetFeedback();
+              }}
+            >
+              {passwordMode === "signin" ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
+            </button>
+          )}
+        </div>
 
         {error && (
           <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: T.redBg, color: T.red, fontSize: 13 }}>

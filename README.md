@@ -11,7 +11,7 @@ src/App.jsx           → toda la aplicación (UI + motor de cálculo)
 src/seed.js           → datos iniciales extraídos del Excel (25 clientes, 210 facturas, presupuesto de egresos)
 src/storage.js        → ÚNICO archivo a modificar para cambiar dónde se guardan los datos
 src/supabaseClient.js → cliente de Supabase + lista de correos permitidos (ALLOWED_EMAILS)
-src/Auth.jsx          → pantalla de login (magic link por email) y verificación de acceso
+src/Auth.jsx          → pantalla de login (magic link o contraseña) y verificación de acceso
 src/main.jsx          → punto de entrada de React
 supabase/schema.sql   → SQL para crear la tabla app_state y sus políticas RLS
 ```
@@ -38,9 +38,12 @@ corre ese SQL una vez en el SQL Editor de tu proyecto Supabase.
 
 ## Autenticación
 
-`src/Auth.jsx` muestra una pantalla de login antes de renderizar `App`:
-correo por magic link (sin contraseña), vía Supabase Auth nativo. No
-requiere configurar ningún provider externo.
+`src/Auth.jsx` muestra una pantalla de login antes de renderizar `App`, con
+dos métodos (Supabase Auth nativo, sin providers externos que configurar):
+
+- **Magic link** (por defecto): solo correo, sin contraseña.
+- **Contraseña**: iniciar sesión o crear cuenta con correo + contraseña.
+  El usuario puede alternar entre ambos con el link debajo del formulario.
 
 La URL de la app (localhost en dev, la de producción tras el deploy) debe
 estar agregada en **Supabase → Authentication → URL Configuration** (Site
