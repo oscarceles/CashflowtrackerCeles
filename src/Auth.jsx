@@ -30,16 +30,6 @@ const primaryBtn = {
   fontWeight: 600,
   cursor: "pointer",
 };
-const oauthBtn = {
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: `1px solid ${T.line}`,
-  background: "#fff",
-  color: T.ink,
-  fontSize: 14,
-  cursor: "pointer",
-};
-
 function LoginForm({ banner }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,15 +53,6 @@ function LoginForm({ banner }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleOAuth(provider) {
-    setError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) setError(error.message);
   }
 
   return (
@@ -130,18 +111,6 @@ function LoginForm({ banner }) {
             {banner}
           </div>
         )}
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "20px 0" }}>
-          <div style={{ flex: 1, height: 1, background: T.line }} />
-          <span style={{ fontSize: 12, color: T.sub }}>o</span>
-          <div style={{ flex: 1, height: 1, background: T.line }} />
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button type="button" onClick={() => handleOAuth("azure")} style={oauthBtn}>
-            Continuar con Microsoft
-          </button>
-        </div>
       </div>
     </div>
   );

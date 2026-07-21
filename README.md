@@ -38,14 +38,13 @@ corre ese SQL una vez en el SQL Editor de tu proyecto Supabase.
 
 ## Autenticación
 
-`src/Auth.jsx` muestra una pantalla de login antes de renderizar `App` y
-soporta:
+`src/Auth.jsx` muestra una pantalla de login antes de renderizar `App`:
+correo por magic link (sin contraseña), vía Supabase Auth nativo. No
+requiere configurar ningún provider externo.
 
-- Email por magic link (sin contraseña) — Supabase Auth nativo.
-- Microsoft (OAuth) — hay que habilitar este provider en
-  **Supabase → Authentication → Providers** con las credenciales de
-  Azure AD, y agregar la URL de la app en
-  **Authentication → URL Configuration** (Site URL / Redirect URLs).
+La URL de la app (localhost en dev, la de producción tras el deploy) debe
+estar agregada en **Supabase → Authentication → URL Configuration** (Site
+URL / Redirect URLs) para que el enlace del correo redirija correctamente.
 
 Solo los correos en `ALLOWED_EMAILS` (`src/supabaseClient.js`) pueden entrar,
 sin importar el método de login. Si alguien fuera de la lista inicia sesión,
