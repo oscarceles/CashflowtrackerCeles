@@ -30,16 +30,6 @@ const primaryBtn = {
   fontWeight: 600,
   cursor: "pointer",
 };
-const linkBtn = {
-  marginTop: 10,
-  background: "none",
-  border: "none",
-  color: T.blue,
-  fontSize: 12,
-  cursor: "pointer",
-  padding: 0,
-  textAlign: "left",
-};
 const oauthBtn = {
   padding: "10px 12px",
   borderRadius: 8,
@@ -51,9 +41,7 @@ const oauthBtn = {
 };
 
 function LoginForm({ banner }) {
-  const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
@@ -64,16 +52,12 @@ function LoginForm({ banner }) {
     setError(null);
     setMessage(null);
     try {
-      if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        if (data.user && !data.session) {
-          setMessage("Revisa tu correo para confirmar la cuenta antes de entrar.");
-        }
-      }
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      setMessage("Revisa tu correo: te enviamos un enlace para entrar.");
     } catch (err) {
       setError(err.message || "Error de autenticación.");
     } finally {
@@ -126,23 +110,10 @@ function LoginForm({ banner }) {
             onChange={(e) => setEmail(e.target.value)}
             style={inputStyle}
           />
-          <input
-            type="password"
-            required
-            minLength={6}
-            placeholder="Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={inputStyle}
-          />
           <button type="submit" disabled={busy} style={primaryBtn}>
-            {busy ? "..." : mode === "signin" ? "Entrar" : "Crear cuenta"}
+            {busy ? "..." : "Enviar enlace de acceso"}
           </button>
         </form>
-
-        <button type="button" onClick={() => setMode(mode === "signin" ? "signup" : "signin")} style={linkBtn}>
-          {mode === "signin" ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
-        </button>
 
         {error && (
           <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: T.redBg, color: T.red, fontSize: 13 }}>
@@ -167,9 +138,6 @@ function LoginForm({ banner }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button type="button" onClick={() => handleOAuth("google")} style={oauthBtn}>
-            Continuar con Google
-          </button>
           <button type="button" onClick={() => handleOAuth("azure")} style={oauthBtn}>
             Continuar con Microsoft
           </button>

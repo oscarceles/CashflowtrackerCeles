@@ -41,10 +41,10 @@ corre ese SQL una vez en el SQL Editor de tu proyecto Supabase.
 `src/Auth.jsx` muestra una pantalla de login antes de renderizar `App` y
 soporta:
 
-- Email + contraseña (Supabase Auth nativo).
-- Google y Microsoft (OAuth) — hay que habilitar estos providers en
-  **Supabase → Authentication → Providers** con sus credenciales de
-  Google Cloud Console / Azure AD, y agregar la URL de la app en
+- Email por magic link (sin contraseña) — Supabase Auth nativo.
+- Microsoft (OAuth) — hay que habilitar este provider en
+  **Supabase → Authentication → Providers** con las credenciales de
+  Azure AD, y agregar la URL de la app en
   **Authentication → URL Configuration** (Site URL / Redirect URLs).
 
 Solo los correos en `ALLOWED_EMAILS` (`src/supabaseClient.js`) pueden entrar,
