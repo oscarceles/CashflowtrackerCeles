@@ -11,7 +11,7 @@ src/App.jsx           → toda la aplicación (UI + motor de cálculo)
 src/seed.js           → datos iniciales extraídos del Excel (25 clientes, 210 facturas, presupuesto de egresos)
 src/storage.js        → ÚNICO archivo a modificar para cambiar dónde se guardan los datos
 src/supabaseClient.js → cliente de Supabase + lista de correos permitidos (ALLOWED_EMAILS)
-src/Auth.jsx          → pantalla de login (email/password, Google, Microsoft) y verificación de acceso
+src/Auth.jsx          → pantalla de login (magic link por email) y verificación de acceso
 src/main.jsx          → punto de entrada de React
 supabase/schema.sql   → SQL para crear la tabla app_state y sus políticas RLS
 ```
@@ -58,7 +58,7 @@ agregar o quitar gente del equipo, edita ese arreglo y vuelve a desplegar.
 3. Definir las variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en la
    configuración de entorno del hosting.
 4. Agregar la URL final (Netlify/Vercel) en Supabase → Authentication → URL
-   Configuration para que el login con Google/Microsoft redirija bien.
+   Configuration para que el magic link redirija bien.
 
 ## Notas de diseño
 
