@@ -192,18 +192,23 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => checkSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => checkSession(s));
+    // Defer with setTimeout: calling supabase.auth.signOut() synchronously
+    // inside onAuthStateChange can deadlock the internal auth lock.
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setTimeout(() => checkSession(s), 0);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  function checkSession(s) {
+  async function checkSession(s) {
     if (!s) {
       setSession(null);
       return;
     }
-    if (!isEmailAllowed(s.user.email)) {
+    const allowed = await isEmailAllowed(s.user.email);
+    if (!allowed) {
       setNotAllowed(s.user.email);
-      supabase.auth.signOut();
+      await supabase.auth.signOut();
       setSession(null);
       return;
     }

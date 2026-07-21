@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { SEED } from "./seed";
 import { loadState, saveState, clearState } from "./storage";
+import { supabase, listAllowedUsers, addAllowedUser, removeAllowedUser } from "./supabaseClient";
 
 
 /* ============================= THEME ============================= */
@@ -905,6 +906,99 @@ function AssumptionsView({ state, setState, resetAll, saved }) {
   );
 }
 
+/* ============================= USERS (TEAM ACCESS) ============================= */
+function UsersView() {
+  const [users, setUsers] = useState(null);
+  const [me, setMe] = useState(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    setError(null);
+    try {
+      const [list, { data: { user } }] = await Promise.all([listAllowedUsers(), supabase.auth.getUser()]);
+      setUsers(list);
+      setMe(user?.email?.toLowerCase() || null);
+    } catch (e) {
+      setError(e.message || "No se pudo cargar la lista.");
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setBusy(true); setError(null);
+    try {
+      await addAllowedUser(email.trim());
+      setEmail("");
+      await load();
+    } catch (e) {
+      setError(e.message || "No se pudo agregar el correo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async (target) => {
+    if (!window.confirm(`Quitar el acceso de ${target}?`)) return;
+    setBusy(true); setError(null);
+    try {
+      await removeAllowedUser(target);
+      await load();
+    } catch (e) {
+      setError(e.message || "No se pudo quitar el acceso.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 16, alignItems: "start" }}>
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>Agregar persona</div>
+        <form onSubmit={handleAdd} style={{ display: "flex", gap: 8 }}>
+          <input type="email" required placeholder="correo@celes.ai" value={email}
+            onChange={(e) => setEmail(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+          <Btn kind="primary" disabled={busy}>Agregar</Btn>
+        </form>
+        <div style={{ fontSize: 12, color: T.sub, marginTop: 10, lineHeight: 1.5 }}>
+          Solo quien ya tiene acceso puede agregar o quitar personas. El nuevo
+          correo podrá entrar con magic link o contraseña la próxima vez que
+          inicie sesión.
+        </div>
+        {error && (
+          <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: T.redBg, color: T.red, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>Con acceso ({users?.length ?? "…"})</div>
+        {!users ? (
+          <div style={{ fontSize: 13, color: T.sub }}>Cargando…</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {users.map((u) => (
+              <div key={u.email} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: T.grayBg }}>
+                <div style={{ fontSize: 13.5 }}>
+                  {u.email}
+                  {u.email === me && <span style={{ marginLeft: 8, fontSize: 11, color: T.sub }}>(tú)</span>}
+                </div>
+                <Btn kind="danger" small disabled={busy || u.email === me}
+                  title={u.email === me ? "Pide a un compañero que quite tu acceso" : "Quitar acceso"}
+                  onClick={() => handleRemove(u.email)}>Quitar</Btn>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 /* ============================= SEED → STATE ============================= */
 function buildInitialState() {
   const todayReal = iso(new Date());
@@ -928,6 +1022,7 @@ const NAV = [
   { id: "deferred", label: "Deferred Income", icon: "◔" },
   { id: "aging", label: "AR Aging", icon: "◷" },
   { id: "assumptions", label: "Assumptions", icon: "⚙" },
+  { id: "users", label: "Team Access", icon: "◈" },
 ];
 
 /* ============================= APP ============================= */
@@ -979,6 +1074,7 @@ export default function App() {
     dashboard: "Cash Flow Dashboard", clients: "Master Clients", invoices: "Invoice Schedule",
     weekly: "Weekly Cash Flow", monthly: "Monthly Summary", outflows: "Outflow Schedule — Operating Budget",
     deferred: "Deferred Income", aging: "Accounts Receivable Aging", assumptions: "Assumptions & Settings",
+    users: "Team Access",
   };
 
   return (
@@ -1036,6 +1132,7 @@ export default function App() {
         {view === "deferred" && <DeferredView M={M} />}
         {view === "aging" && <ArAgingView M={M} />}
         {view === "assumptions" && <AssumptionsView state={state} setState={setState} resetAll={resetAll} saved={saved} />}
+        {view === "users" && <UsersView />}
       </div>
     </div>
   );

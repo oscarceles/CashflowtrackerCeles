@@ -10,11 +10,15 @@ Deferred Income, AR Aging y Assumptions. Todo se recalcula en tiempo real.
 src/App.jsx           → toda la aplicación (UI + motor de cálculo)
 src/seed.js           → datos iniciales extraídos del Excel (25 clientes, 210 facturas, presupuesto de egresos)
 src/storage.js        → ÚNICO archivo a modificar para cambiar dónde se guardan los datos
-src/supabaseClient.js → cliente de Supabase + lista de correos permitidos (ALLOWED_EMAILS)
+src/supabaseClient.js → cliente de Supabase + funciones para leer/agregar/quitar el allowlist del equipo
 src/Auth.jsx          → pantalla de login (magic link o contraseña) y verificación de acceso
 src/main.jsx          → punto de entrada de React
-supabase/schema.sql   → SQL para crear la tabla app_state y sus políticas RLS
+supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
 ```
+
+La pestaña **Team Access** dentro de la app permite agregar o quitar personas
+del equipo sin tocar código: la lista vive en la tabla `allowed_users` de
+Supabase, y cualquier persona que ya tenga acceso puede administrarla.
 
 ## Correr en local
 
@@ -49,10 +53,11 @@ La URL de la app (localhost en dev, la de producción tras el deploy) debe
 estar agregada en **Supabase → Authentication → URL Configuration** (Site
 URL / Redirect URLs) para que el enlace del correo redirija correctamente.
 
-Solo los correos en `ALLOWED_EMAILS` (`src/supabaseClient.js`) pueden entrar,
-sin importar el método de login. Si alguien fuera de la lista inicia sesión,
-se cierra su sesión automáticamente y ve un mensaje de acceso denegado. Para
-agregar o quitar gente del equipo, edita ese arreglo y vuelve a desplegar.
+Solo los correos en la tabla `allowed_users` pueden entrar, sin importar el
+método de login. Si alguien fuera de la lista inicia sesión, se cierra su
+sesión automáticamente y ve un mensaje de acceso denegado. Para agregar o
+quitar gente del equipo, usa la pestaña **Team Access** dentro de la app
+(no requiere redeploy).
 
 ## Deploy (GitHub → Netlify o Vercel)
 
