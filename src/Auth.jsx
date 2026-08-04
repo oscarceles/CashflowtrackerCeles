@@ -39,6 +39,15 @@ const linkBtn = {
   padding: 0,
   textAlign: "left",
 };
+const oauthBtn = {
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: `1px solid ${T.line}`,
+  background: "#fff",
+  color: T.ink,
+  fontSize: 14,
+  cursor: "pointer",
+};
 
 function LoginForm({ banner }) {
   const [authMethod, setAuthMethod] = useState("magic"); // "magic" | "password"
@@ -83,6 +92,15 @@ function LoginForm({ banner }) {
     }
   }
 
+  async function handleGoogle() {
+    resetFeedback();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) setError(error.message);
+  }
+
   return (
     <div
       style={{
@@ -109,6 +127,16 @@ function LoginForm({ banner }) {
         <p style={{ fontSize: 13, color: T.sub, marginBottom: 24 }}>
           Acceso solo para el equipo de Celes.
         </p>
+
+        <button type="button" onClick={handleGoogle} style={{ ...oauthBtn, width: "100%", marginBottom: 16 }}>
+          Continuar con Google
+        </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <div style={{ flex: 1, height: 1, background: T.line }} />
+          <span style={{ fontSize: 12, color: T.sub }}>o</span>
+          <div style={{ flex: 1, height: 1, background: T.line }} />
+        </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <input

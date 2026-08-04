@@ -43,11 +43,25 @@ corre ese SQL una vez en el SQL Editor de tu proyecto Supabase.
 ## Autenticación
 
 `src/Auth.jsx` muestra una pantalla de login antes de renderizar `App`, con
-dos métodos (Supabase Auth nativo, sin providers externos que configurar):
+tres métodos:
 
-- **Magic link** (por defecto): solo correo, sin contraseña.
+- **Google** (recomendado): OAuth con el consentimiento configurado como
+  **Internal** en Google Cloud, así que solo cuentas `@celes.ai` de Workspace
+  pueden iniciar sesión. No depende del envío de correo, así que no le afecta
+  el límite de envíos de Supabase.
+- **Magic link**: solo correo, sin contraseña. Requiere que el SMTP de
+  Supabase esté configurado (ver nota abajo) o quedará limitado a ~2
+  correos/hora con el servicio de envío por defecto de Supabase.
 - **Contraseña**: iniciar sesión o crear cuenta con correo + contraseña.
-  El usuario puede alternar entre ambos con el link debajo del formulario.
+
+El usuario puede alternar entre magic link y contraseña con el link debajo
+del formulario; Google siempre está disponible arriba.
+
+> **Nota sobre envío de correo**: el servicio de email por defecto de
+> Supabase es solo para pruebas (~2 correos/hora, compartido entre todos los
+> métodos que envían correo). Para producción, configura un SMTP propio en
+> Supabase → Authentication → Emails → SMTP Settings (por ejemplo, un buzón
+> de Google Workspace con verificación en 2 pasos + contraseña de aplicación).
 
 La URL de la app (localhost en dev, la de producción tras el deploy) debe
 estar agregada en **Supabase → Authentication → URL Configuration** (Site
