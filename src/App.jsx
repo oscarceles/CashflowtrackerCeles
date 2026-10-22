@@ -10,6 +10,7 @@ import { supabase } from "./supabaseClient";
 import { useMember, canView, canEdit, isSuperAdmin } from "./access";
 import AdminWorkspace from "./Admin";
 import UserMenu from "./UserMenu";
+import PeopleWorkspace from "./People";
 
 // True when the signed-in member can only view the current module.
 const ReadOnlyContext = React.createContext(false);
@@ -1877,7 +1878,7 @@ export default function App() {
   const moduleCards = [
     { id: "cashflow", name: "Cashflow", description: "Proyección de caja, facturación, inversiones y reportes.", icon: "↗", color: "#2A5AF4" },
     { id: "board", name: "Board", description: "Legal Docs Series A, tareas y entidades locales.", icon: "▦", color: "#2A5AF4" },
-    { id: "people", name: "People", description: "Información y procesos del equipo.", icon: "◉", color: "#2A5AF4" },
+    { id: "people", name: "People", description: "Nómina mes a mes, cálculo de la próxima nómina y reportes del equipo.", icon: "◉", color: "#2A5AF4" },
   ].filter((item) => canView(member, item.id));
   // Administración lives in the profile menu (top right), only for Super Admin.
   const hasAccess = (id) => id === "admin" ? isSuperAdmin(member) : moduleCards.some((item) => item.id === id);
@@ -1898,9 +1899,11 @@ export default function App() {
             <UserMenu onAdmin={openAdmin} />
           </div>
         </header>
-        <main style={{ maxWidth: 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
+        <main style={{ maxWidth: module === "people" ? 1440 : 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
           {module === "board" && hasAccess("board") ? (
             <BoardWorkspace editable={canEdit(member, "board")} />
+          ) : module === "people" && hasAccess("people") ? (
+            <PeopleWorkspace editable={canEdit(member, "people")} />
           ) : module === "admin" && hasAccess("admin") ? (
             <AdminWorkspace />
           ) : constructionModule ? (
@@ -1938,10 +1941,9 @@ export default function App() {
                     <span style={{ display: "block", fontSize: 21, fontWeight: 650 }}>{item.name}</span>
                     <span style={{ display: "block", marginTop: 8, color: "#596579", fontSize: 13, lineHeight: 1.55 }}>{item.description}</span>
                     <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto", paddingTop: 18 }}>
-                      <span style={{ color: item.id === "people" ? "#647084" : "#2A5AF4", fontSize: 12, fontWeight: 600 }}>
-                        {item.id === "people" ? "En construcción" : item.id !== "admin" && !canEdit(member, item.id) ? "Abrir · Solo lectura" : "Abrir módulo"}
+                      <span style={{ color: "#2A5AF4", fontSize: 12, fontWeight: 600 }}>
+                        {!canEdit(member, item.id) ? "Abrir · Solo lectura" : "Abrir módulo"}
                       </span>
-                      {item.id === "people" && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#159B76" }} />}
                     </span>
                   </button>
                 ))}
