@@ -1,8 +1,15 @@
 # Celes — Cash Flow Command Center
 
-App web construida a partir de `Celes_CashFlow_Tracker_v3.xlsx`. Incluye Dashboard,
-Master Clients, Invoice Schedule, Weekly/Monthly Cash Flow, Outflow Schedule,
-Deferred Income, AR Aging y Assumptions. Todo se recalcula en tiempo real.
+App web construida a partir de `Celes_CashFlow_Tracker_v3.xlsx`. La portada organiza
+el producto en los modulos Cashflow, Board y People. Cashflow contiene Dashboard,
+Reports, Investment, Master Clients, Invoice Schedule, Weekly/Monthly Cash Flow,
+Outflow Schedule, Deferred Income, AR Aging, Assumptions y Team Access. Board
+contiene Legal Docs Series A (lector PDF privado), Series A Tasks (con adjuntos
+privados) y Local entities; People muestra "En construcción". Los calculos se
+actualizan en tiempo real.
+
+Consulta [WIKI.md](WIKI.md) para el funcionamiento actual detallado. Mantenerlo
+actualizado junto con cada modificacion o fix del producto.
 
 ## Estructura
 
@@ -13,7 +20,10 @@ src/storage.js        → ÚNICO archivo a modificar para cambiar dónde se guar
 src/supabaseClient.js → cliente de Supabase + funciones para leer/agregar/quitar el allowlist del equipo
 src/Auth.jsx          → pantalla de login (magic link o contraseña) y verificación de acceso
 src/main.jsx          → punto de entrada de React
+src/cashflow.css      → estilos con la identidad visual de Celes
 supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
+netlify/functions/    → funciones server-side de Board (documentos Series A y tareas/adjuntos)
+scripts/deploy-production.mjs → deploy a producción con las credenciales server-side de Board
 ```
 
 La pestaña **Team Access** dentro de la app permite agregar o quitar personas
@@ -82,9 +92,15 @@ quitar gente del equipo, usa la pestaña **Team Access** dentro de la app
 4. Agregar la URL final (Netlify/Vercel) en Supabase → Authentication → URL
    Configuration para que el magic link redirija bien.
 
+Las funciones de Board (`netlify/functions/`) necesitan además `SUPABASE_URL`,
+`SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` en el servidor. Hoy esas
+credenciales se empaquetan con `node scripts/deploy-production.mjs` (despliegue
+manual desde local con `.env`); un build automático desde GitHub sin esas
+variables deja las funciones de Board respondiendo "not configured" (503).
+
 ## Notas de diseño
 
-- Fecha "as of": por defecto es el día real; se puede fijar en Assumptions.
+- Fecha "as of": por defecto sigue la fecha local actual (al abrir, sincronizar y cada medianoche); desactiva "Use current date automatically" en Assumptions para fijar una fecha histórica.
 - Balance proyectado = asume que todo lo facturado se cobra en la fecha esperada.
   Balance real = solo cuenta lo ya cobrado. La brecha entre ambos es la cartera.
 - Los egresos 2027 = 2026 × (1 + escalación definida en Assumptions).

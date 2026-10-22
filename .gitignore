@@ -1,4 +1,6 @@
 node_modules
 dist
+.netlify
+netlify/functions/series-a-secrets.json
 .env
 .claude/settings.local.json

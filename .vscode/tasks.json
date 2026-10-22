@@ -1,0 +1,32 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": ["run", "build"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Deploy production (with Board functions)",
+			"type": "shell",
+			"command": "node",
+			"args": ["scripts/deploy-production.mjs"],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check private file cleanup",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const fs=require('node:fs');const path=require('node:path');let pdfCount=0;const walk=p=>fs.readdirSync(p,{withFileTypes:true}).forEach(e=>{const q=path.join(p,e.name);if(e.isDirectory())walk(q);else if(e.name.toLowerCase().endsWith('.pdf'))pdfCount++});walk('dist');console.log(JSON.stringify({temporarySecretFileExists:fs.existsSync('netlify/functions/series-a-secrets.json'),pdfFilesInPublicBuild:pdfCount}))"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

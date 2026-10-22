@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import "./cashflow.css";
 import {
   ComposedChart, Bar, Line, Area, AreaChart, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, ReferenceLine, Legend, Cell,
@@ -7,27 +8,40 @@ import { SEED } from "./seed";
 import { loadState, saveState, clearState } from "./storage";
 import { supabase, listAllowedUsers, addAllowedUser, removeAllowedUser } from "./supabaseClient";
 
+// PDF.js is loaded on demand so the main bundle stays small.
+let pdfjsPromise;
+const loadPdfjs = () => {
+  pdfjsPromise ||= Promise.all([
+    import("pdfjs-dist"),
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+  ]).then(([pdfjsLib, worker]) => {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = worker.default;
+    return pdfjsLib;
+  });
+  return pdfjsPromise;
+};
+
 
 /* ============================= THEME ============================= */
 const T = {
-  bg: "#F4F5F2",
+  bg: "#F7F9FC",
   panel: "#FFFFFF",
-  ink: "#13202F",
-  sub: "#5C6B7A",
-  line: "#E3E7E9",
-  side: "#0D1B2A",
-  sideInk: "#B9C6D4",
-  sideActive: "#16283C",
-  green: "#0E9F6E",
-  greenBg: "#E6F6EF",
+  ink: "#0F172A",
+  sub: "#647084",
+  line: "#E2E8F0",
+  side: "#FFFFFF",
+  sideInk: "#526176",
+  sideActive: "#EEF3FF",
+  green: "#159B76",
+  greenBg: "#E8F6F1",
   red: "#DE3E46",
   redBg: "#FCEBEC",
   amber: "#C77A08",
   amberBg: "#FBF1DF",
-  blue: "#2563EB",
-  blueBg: "#E8EFFD",
-  gray: "#6B7280",
-  grayBg: "#EEF1F3",
+  blue: "#2A5AF4",
+  blueBg: "#EEF3FF",
+  gray: "#647084",
+  grayBg: "#F1F4F8",
   mono: "'SF Mono','Cascadia Mono','Roboto Mono',ui-monospace,monospace",
 };
 
@@ -117,6 +131,7 @@ const STATUS_STYLE = {
 
 function useModel(state) {
   const { clients, invoices, outflows, assumptions } = state;
+  const investments = state.investments || [];
   return useMemo(() => {
     const today = assumptions.today;
     const esc = assumptions.escalation;
@@ -130,16 +145,27 @@ function useModel(state) {
       outflowByMonth[mk] = areas.reduce((s, a) => s + (outflows[a][mi] || 0) * (is27 ? 1 + esc : 1), 0);
     });
 
+    const investmentByMonth = {};
+    ALL_MONTHS.forEach((mk) => { investmentByMonth[mk] = 0; });
+    investments.forEach((investment) => {
+      const mk = monthKey(investment.date);
+      if (investmentByMonth[mk] != null) investmentByMonth[mk] += investment.amount;
+    });
+
     /* monthly summary */
     let projBal = assumptions.opening, realBal = assumptions.opening;
     const monthly = ALL_MONTHS.map((mk) => {
       const inv = withStatus.filter((v) => monthKey(v.cash) === mk);
       const inflow = inv.reduce((s, v) => s + v.amt, 0);
       const paid = inv.filter((v) => v.paid).reduce((s, v) => s + v.amt, 0);
+      const investment = investmentByMonth[mk];
+      const investmentReceived = investments
+        .filter((v) => monthKey(v.date) === mk && v.date <= today)
+        .reduce((s, v) => s + v.amount, 0);
       const out = outflowByMonth[mk];
-      const net = inflow - out;
-      projBal += net; realBal += paid - out;
-      return { mk, label: monthLabel(mk), inflow, paid, outstanding: inflow - paid, outflow: out, net, projBal, realBal };
+      const net = inflow + investment - out;
+      projBal += net; realBal += paid + investmentReceived - out;
+      return { mk, label: monthLabel(mk), inflow, paid, outstanding: inflow - paid, investment, investmentReceived, outflow: out, net, projBal, realBal };
     });
 
     /* weekly */
@@ -150,8 +176,11 @@ function useModel(state) {
     while (ws <= "2027-12-31") {
       const we = addDays(ws, 6);
       const inv = withStatus.filter((v) => v.cash >= ws && v.cash <= we);
+      const weekInvestments = investments.filter((investment) => investment.date >= ws && investment.date <= we);
       const inflow = inv.reduce((s, v) => s + v.amt, 0);
       const paid = inv.filter((v) => v.paid).reduce((s, v) => s + v.amt, 0);
+      const investment = weekInvestments.reduce((s, v) => s + v.amount, 0);
+      const investmentReceived = weekInvestments.filter((v) => v.date <= today).reduce((s, v) => s + v.amount, 0);
       let out = 0;
       for (let i = 0; i < 7; i++) {
         const d = addDays(ws, i); const mk = monthKey(d);
@@ -160,8 +189,8 @@ function useModel(state) {
           out += outflowByMonth[mk] / dim;
         }
       }
-      wProj += inflow - out; wReal += paid - out;
-      weeks.push({ wk, ws, we, year: +we.slice(0, 4), inflow, paid, outstanding: inflow - paid, outflow: out, net: inflow - out, projBal: wProj, realBal: wReal, clients: inv });
+      wProj += inflow + investment - out; wReal += paid + investmentReceived - out;
+      weeks.push({ wk, ws, we, year: +we.slice(0, 4), inflow, paid, outstanding: inflow - paid, investment, outflow: out, net: inflow + investment - out, projBal: wProj, realBal: wReal, clients: inv, investments: weekInvestments });
       ws = addDays(ws, 7); wk++;
     }
 
@@ -230,7 +259,7 @@ function useModel(state) {
       },
       overdue, dueSoon, buckets, deferred,
     };
-  }, [clients, invoices, outflows, assumptions]);
+  }, [clients, invoices, outflows, assumptions, investments]);
 }
 
 /* ============================= SMALL UI PIECES ============================= */
@@ -240,7 +269,7 @@ const Chip = ({ status }) => {
 };
 
 const Card = ({ children, style }) => (
-  <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 10, padding: 16, ...style }}>{children}</div>
+  <div style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, padding: 16, boxShadow: "0 2px 10px rgba(15,23,42,.025)", ...style }}>{children}</div>
 );
 
 const Kpi = ({ label, value, sub, color }) => (
@@ -259,14 +288,14 @@ const Field = ({ label, children }) => (
 );
 const Btn = ({ children, onClick, kind = "primary", small, disabled, title }) => {
   const styles = {
-    primary: { background: T.ink, color: "#fff", border: "none" },
+    primary: { background: T.blue, color: "#fff", border: "none" },
     ghost: { background: "#fff", color: T.ink, border: `1px solid ${T.line}` },
     green: { background: T.green, color: "#fff", border: "none" },
     danger: { background: "#fff", color: T.red, border: `1px solid ${T.line}` },
   };
   return (
     <button onClick={onClick} disabled={disabled} title={title}
-      style={{ ...styles[kind], borderRadius: 7, padding: small ? "4px 10px" : "8px 14px", fontSize: small ? 12 : 13, fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 }}>
+      style={{ ...styles[kind], borderRadius: 6, padding: small ? "4px 10px" : "8px 14px", fontSize: small ? 12 : 13, fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 }}>
       {children}
     </button>
   );
@@ -389,12 +418,95 @@ function InvoiceForm({ initial, clients, onSave, onClose }) {
   );
 }
 
+function InvestmentForm({ initial, onSave, onClose }) {
+  const [investment, setInvestment] = useState({ ...initial });
+  const set = (key) => (e) => setInvestment({
+    ...investment,
+    [key]: e.target.type === "number" ? +e.target.value : e.target.value,
+  });
+  const valid = investment.thirdParty.trim() && investment.date && investment.amount > 0;
+  return (
+    <Modal title={investment.id ? "Edit investment" : "Add investment"} onClose={onClose} width={520}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Third party / investor">
+          <input style={inputStyle} value={investment.thirdParty} onChange={set("thirdParty")} autoFocus />
+        </Field>
+        <Field label="Amount ($)">
+          <input type="number" min="0.01" step="0.01" style={inputStyle} value={investment.amount} onChange={set("amount")} />
+        </Field>
+        <Field label="Investment date">
+          <input type="date" style={inputStyle} value={investment.date} onChange={set("date")} />
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+        <Btn kind="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn disabled={!valid} onClick={() => onSave({ ...investment, thirdParty: investment.thirdParty.trim() })}>Save investment</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 /* ============================= VIEWS ============================= */
+
+function InvestmentsView({ state, setState, today }) {
+  const [editing, setEditing] = useState(null);
+  const investments = state.investments || [];
+  const total = investments.reduce((sum, investment) => sum + investment.amount, 0);
+  const save = (investment) => {
+    setState((current) => ({
+      ...current,
+      investments: investment.id
+        ? (current.investments || []).map((item) => item.id === investment.id ? investment : item)
+        : [...(current.investments || []), { ...investment, id: nid() }],
+    }));
+    setEditing(null);
+  };
+  const remove = (id) => {
+    if (!window.confirm("Delete this investment?")) return;
+    setState((current) => ({ ...current, investments: (current.investments || []).filter((item) => item.id !== id) }));
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: T.sub }}>Investments are cash inflows on their investment date and affect projected and real cash balances.</div>
+        <Btn onClick={() => setEditing({ thirdParty: "", amount: 0, date: today })}>+ Add investment</Btn>
+      </div>
+      <Card style={{ padding: 0, overflow: "auto", maxHeight: "70vh" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>
+            <th style={th}>Date</th><th style={th}>Third party / investor</th><th style={thN}>Amount</th><th style={th}>Actions</th>
+          </tr></thead>
+          <tbody>
+            {investments.slice().sort((a, b) => b.date.localeCompare(a.date)).map((investment) => (
+              <tr key={investment.id}>
+                <td style={td}>{fmtD(investment.date)}</td>
+                <td style={{ ...td, fontWeight: 600 }}>{investment.thirdParty}</td>
+                <td style={{ ...tdN, color: T.green }}>{fmt$(investment.amount, 2)}</td>
+                <td style={{ ...td, display: "flex", gap: 6 }}>
+                  <Btn small kind="ghost" onClick={() => setEditing({ ...investment })}>Edit</Btn>
+                  <Btn small kind="danger" onClick={() => remove(investment.id)}>Delete</Btn>
+                </td>
+              </tr>
+            ))}
+            {investments.length === 0 && <tr><td style={{ ...td, color: T.sub }} colSpan={4}>No investments recorded.</td></tr>}
+          </tbody>
+          <tfoot><tr style={{ background: T.grayBg }}>
+            <td style={{ ...td, fontWeight: 700 }} colSpan={2}>Total investments</td>
+            <td style={{ ...tdN, fontWeight: 800 }}>{fmt$(total, 2)}</td>
+            <td style={td}></td>
+          </tr></tfoot>
+        </table>
+      </Card>
+      {editing && <InvestmentForm initial={editing} onClose={() => setEditing(null)} onSave={save} />}
+    </div>
+  );
+}
 
 function DashboardView({ M, A, go }) {
   const { kpi, monthly, overdue, dueSoon } = M;
   const zeroLabel = kpi.zeroWeek ? fmtD(kpi.zeroWeek.ws) : null;
-  const chartData = monthly.map((m) => ({ label: m.label, Inflows: m.inflow, Outflows: -m.outflow, "Projected balance": m.projBal, "Real balance (paid only)": m.realBal }));
+  const chartData = monthly.map((m) => ({ label: m.label, Inflows: m.inflow, Investments: m.investment, Outflows: -m.outflow, "Projected balance": m.projBal, "Real balance (paid only)": m.realBal }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Runway strip — the signature element */}
@@ -464,6 +576,7 @@ function DashboardView({ M, A, go }) {
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <ReferenceLine y={0} stroke={T.sub} />
               <Bar dataKey="Inflows" fill={T.green} radius={[3, 3, 0, 0]} barSize={9} />
+              <Bar dataKey="Investments" fill={T.blue} radius={[3, 3, 0, 0]} barSize={9} />
               <Bar dataKey="Outflows" fill="#C9535A" radius={[0, 0, 3, 3]} barSize={9} />
               <Line dataKey="Projected balance" stroke={T.blue} strokeWidth={2} dot={false} />
               <Line dataKey="Real balance (paid only)" stroke={T.ink} strokeWidth={2} strokeDasharray="5 4" dot={false} />
@@ -657,9 +770,9 @@ function WeeklyView({ M }) {
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead><tr>
             <th style={th}>Wk</th><th style={th}>Week</th>
-            <th style={thN}>Collected</th><th style={thN}>Projected in</th><th style={thN}>Total in</th>
+            <th style={thN}>Collected</th><th style={thN}>Invoice due</th><th style={thN}>Investments</th><th style={thN}>Total in</th>
             <th style={thN}>Outflow</th><th style={thN}>Net</th><th style={thN}>Proj. balance</th><th style={thN}>Real balance</th>
-            <th style={th}>Receipts</th>
+            <th style={th}>Receipts / investors</th>
           </tr></thead>
           <tbody>
             {weeks.map((w) => (
@@ -668,13 +781,14 @@ function WeeklyView({ M }) {
                 <td style={td}>{fmtD(w.ws)} – {fmtD(w.we)}</td>
                 <td style={{ ...tdN, color: T.green }}>{w.paid ? fmt$(w.paid) : "—"}</td>
                 <td style={{ ...tdN, color: T.blue }}>{w.outstanding ? fmt$(w.outstanding) : "—"}</td>
-                <td style={tdN}>{w.inflow ? fmt$(w.inflow) : "—"}</td>
+                <td style={{ ...tdN, color: T.blue }}>{w.investment ? fmt$(w.investment) : "—"}</td>
+                <td style={tdN}>{w.inflow + w.investment ? fmt$(w.inflow + w.investment) : "—"}</td>
                 <td style={{ ...tdN, color: "#A33" }}>{fmt$(w.outflow)}</td>
                 <td style={{ ...tdN, color: w.net < 0 ? T.red : T.green }}>{fmt$(w.net)}</td>
                 <td style={{ ...tdN, fontWeight: 700, color: w.projBal < 0 ? T.red : T.ink }}>{fmt$(w.projBal)}</td>
                 <td style={{ ...tdN, color: w.realBal < 0 ? T.red : T.sub }}>{fmt$(w.realBal)}</td>
                 <td style={{ ...td, fontSize: 11.5, color: T.sub, whiteSpace: "normal", maxWidth: 260 }}>
-                  {w.clients.map((c) => c.client + " " + fmtK(c.amt)).join(" · ")}
+                  {[...w.clients.map((c) => c.client + " " + fmtK(c.amt)), ...w.investments.map((v) => v.thirdParty + " " + fmtK(v.amount))].join(" · ")}
                 </td>
               </tr>
             ))}
@@ -685,8 +799,147 @@ function WeeklyView({ M }) {
   );
 }
 
+function ReportsView({ M }) {
+  const [year, setYear] = useState(Number(M.today.slice(0, 4)));
+  const [expandedMonth, setExpandedMonth] = useState(null);
+  const months = MONTHS_SHORT.map((_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
+  const report = months.map((mk) => {
+    const monthStart = `${mk}-01`;
+    const monthEnd = iso(new Date(Number(year), Number(mk.slice(5, 7)), 0));
+    const monthInvoices = M.withStatus.filter((invoice) => monthKey(invoice.idate) === mk);
+    const byClient = Object.values(monthInvoices.reduce((groups, invoice) => {
+      const group = groups[invoice.client] || { client: invoice.client, billed: 0, scheduled: 0, count: 0 };
+      if (invoice.idate <= M.today) group.billed += invoice.amt;
+      else group.scheduled += invoice.amt;
+      group.count += 1;
+      groups[invoice.client] = group;
+      return groups;
+    }, {})).sort((a, b) => (b.billed + b.scheduled) - (a.billed + a.scheduled));
+    const billed = monthInvoices
+      .filter((invoice) => invoice.idate <= M.today)
+      .reduce((sum, invoice) => sum + invoice.amt, 0);
+    const scheduled = monthInvoices
+      .filter((invoice) => invoice.idate > M.today)
+      .reduce((sum, invoice) => sum + invoice.amt, 0);
+    const mrr = M.withStatus.reduce((sum, invoice) => {
+      if (invoice.ps > monthEnd || invoice.pe < monthStart) return sum;
+      const serviceMonths = Math.max(1, Math.round((P(invoice.pe) - P(invoice.ps)) / 86400000 / 30.4));
+      return sum + invoice.amt / serviceMonths;
+    }, 0);
+    return { mk, billed, scheduled, mrr, arr: mrr * 12, byClient };
+  });
+  let ytd = 0;
+  const rows = report.map((month) => {
+    if (month.mk <= monthKey(M.today)) ytd += month.billed;
+    return { ...month, ytd };
+  });
+  const referenceYear = Number(M.today.slice(0, 4));
+  const ytdThrough = year < referenceYear ? `${year}-12-31` : M.today;
+  const runRateMonth = year < referenceYear
+    ? rows[11]
+    : year > Number(M.today.slice(0, 4))
+      ? rows[11]
+      : rows[Number(M.today.slice(5, 7)) - 1];
+  const chart = rows.map((month) => ({
+    label: monthLabel(month.mk),
+    "Billed actual": month.billed,
+    "Scheduled billing": month.scheduled,
+    MRR: month.mrr,
+  }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <label htmlFor="report-year" style={{ fontSize: 13, color: T.sub, fontWeight: 600 }}>Report year</label>
+        <select id="report-year" style={{ ...inputStyle, width: 120 }} value={year} onChange={(e) => setYear(+e.target.value)}>
+          {[2026, 2027].map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <span style={{ fontSize: 12, color: T.sub }}>Actual billing includes invoices dated on or before {fmtD(M.today)}; future invoice dates are shown as scheduled.</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Kpi label={`${year} billed YTD`} value={fmtK(ytd)} sub={`Through ${fmtD(ytdThrough)}`} />
+        <Kpi label={`MRR · ${monthLabel(runRateMonth.mk)}`} value={fmtK(runRateMonth.mrr)} sub="Monthly recurring run rate" color={T.blue} />
+        <Kpi label={`ARR · ${monthLabel(runRateMonth.mk)}`} value={fmtK(runRateMonth.arr)} sub="MRR × 12" color={T.green} />
+      </div>
+
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Monthly billing and recurring revenue</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>MRR is normalized from invoice amounts across their service periods; ARR is the monthly run rate annualized.</div>
+        <div style={{ height: 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chart} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+              <CartesianGrid stroke={T.line} vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: T.sub }} interval={0} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={fmtK} tick={{ fontSize: 10, fill: T.sub }} axisLine={false} tickLine={false} width={54} />
+              <Tooltip content={<ChartTip />} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={0} stroke={T.sub} />
+              <Bar dataKey="Billed actual" fill={T.green} barSize={14} />
+              <Bar dataKey="Scheduled billing" fill="#9DC7F5" barSize={14} />
+              <Line dataKey="MRR" stroke={T.blue} strokeWidth={2} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card style={{ padding: 0, overflow: "auto", maxHeight: "65vh" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>
+            <th style={th}>Month</th><th style={thN}>Billed</th><th style={thN}>Scheduled</th>
+            <th style={thN}>Billed YTD</th><th style={thN}>MRR</th><th style={thN}>ARR</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((month) => (
+              <React.Fragment key={month.mk}>
+                <tr>
+                  <td style={td}>
+                    <button type="button" aria-expanded={expandedMonth === month.mk}
+                      onClick={() => setExpandedMonth(expandedMonth === month.mk ? null : month.mk)}
+                      style={{ display: "flex", alignItems: "center", gap: 7, border: 0, background: "transparent", color: T.ink, padding: 0, font: "inherit", fontWeight: 600, cursor: "pointer" }}>
+                      <span aria-hidden="true" style={{ width: 12, color: T.sub }}>{expandedMonth === month.mk ? "▾" : "▸"}</span>
+                      {monthLabel(month.mk)}
+                    </button>
+                  </td>
+                  <td style={{ ...tdN, color: T.green }}>{month.billed ? fmt$(month.billed) : "—"}</td>
+                  <td style={{ ...tdN, color: T.sub }}>{month.scheduled ? fmt$(month.scheduled) : "—"}</td>
+                  <td style={tdN}>{month.mk <= monthKey(M.today) ? fmt$(month.ytd) : "—"}</td>
+                  <td style={{ ...tdN, color: T.blue }}>{fmt$(month.mrr)}</td>
+                  <td style={{ ...tdN, color: T.green }}>{fmt$(month.arr)}</td>
+                </tr>
+                {expandedMonth === month.mk && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "0 10px 12px 28px", borderBottom: `1px solid ${T.line}` }}>
+                      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                        <thead><tr>
+                          <th style={th}>Client</th><th style={thN}>Billed</th><th style={thN}>Scheduled</th><th style={thN}>Invoices</th>
+                        </tr></thead>
+                        <tbody>
+                          {month.byClient.map((client) => (
+                            <tr key={client.client}>
+                              <td style={{ ...td, fontWeight: 600 }}>{client.client}</td>
+                              <td style={{ ...tdN, color: T.green }}>{client.billed ? fmt$(client.billed) : "—"}</td>
+                              <td style={{ ...tdN, color: T.sub }}>{client.scheduled ? fmt$(client.scheduled) : "—"}</td>
+                              <td style={tdN}>{client.count}</td>
+                            </tr>
+                          ))}
+                          {month.byClient.length === 0 && <tr><td style={{ ...td, color: T.sub }} colSpan={4}>No invoices for this month.</td></tr>}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 function MonthlyView({ M }) {
-  const chart = M.monthly.map((m) => ({ label: m.label, Collected: m.paid, Outstanding: m.outstanding, Outflow: -m.outflow, "Projected balance": m.projBal }));
+  const chart = M.monthly.map((m) => ({ label: m.label, Collected: m.paid, Outstanding: m.outstanding, Investments: m.investment, Outflow: -m.outflow, "Projected balance": m.projBal }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card>
@@ -702,6 +955,7 @@ function MonthlyView({ M }) {
               <ReferenceLine y={0} stroke={T.sub} />
               <Bar dataKey="Collected" stackId="in" fill={T.green} barSize={12} />
               <Bar dataKey="Outstanding" stackId="in" fill="#9DC7F5" barSize={12} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Investments" fill={T.blue} barSize={12} radius={[3, 3, 0, 0]} />
               <Bar dataKey="Outflow" fill="#C9535A" barSize={12} radius={[0, 0, 3, 3]} />
               <Line dataKey="Projected balance" stroke={T.blue} strokeWidth={2} dot={false} />
             </ComposedChart>
@@ -711,7 +965,7 @@ function MonthlyView({ M }) {
       <Card style={{ padding: 0, overflow: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead><tr>
-            <th style={th}>Month</th><th style={thN}>Billed in</th><th style={thN}>Collected</th><th style={thN}>Outstanding</th>
+            <th style={th}>Month</th><th style={thN}>Billed in</th><th style={thN}>Collected</th><th style={thN}>Outstanding</th><th style={thN}>Investments</th>
             <th style={thN}>Outflow</th><th style={thN}>Net</th><th style={thN}>Proj. balance</th><th style={thN}>Real balance</th>
           </tr></thead>
           <tbody>
@@ -721,6 +975,7 @@ function MonthlyView({ M }) {
                 <td style={tdN}>{fmt$(m.inflow)}</td>
                 <td style={{ ...tdN, color: T.green }}>{fmt$(m.paid)}</td>
                 <td style={{ ...tdN, color: T.blue }}>{fmt$(m.outstanding)}</td>
+                <td style={{ ...tdN, color: T.blue }}>{m.investment ? fmt$(m.investment) : "—"}</td>
                 <td style={{ ...tdN, color: "#A33" }}>{fmt$(m.outflow)}</td>
                 <td style={{ ...tdN, color: m.net < 0 ? T.red : T.green }}>{fmt$(m.net)}</td>
                 <td style={{ ...tdN, fontWeight: 700, color: m.projBal < 0 ? T.red : T.ink }}>{fmt$(m.projBal)}</td>
@@ -860,8 +1115,26 @@ function AssumptionsView({ state, setState, resetAll, saved }) {
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 12 }}>Model levers</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <Field label='"As of" date (drives overdue / aging — defaults to today)'>
-            <input type="date" style={inputStyle} value={a.today} onChange={(e) => set("today", e.target.value)} />
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: T.ink }}>
+            <input type="checkbox" checked={a.autoToday !== false} onChange={(e) => {
+              const autoToday = e.target.checked;
+              setState((s) => ({
+                ...s,
+                assumptions: {
+                  ...s.assumptions,
+                  autoToday,
+                  ...(autoToday ? { today: iso(new Date()) } : {}),
+                },
+              }));
+            }} />
+            Use current date automatically
+          </label>
+          <Field label='"As of" date (drives overdue / aging)'>
+            <input type="date" style={inputStyle} value={a.today} disabled={a.autoToday !== false}
+              onChange={(e) => setState((s) => ({
+                ...s,
+                assumptions: { ...s.assumptions, today: e.target.value, autoToday: false },
+              }))} />
           </Field>
           <Field label="Opening cash balance, Jan 2026 ($)">
             <input type="number" style={inputStyle} value={a.opening} onChange={(e) => set("opening", +e.target.value || 0)} />
@@ -999,12 +1272,581 @@ function UsersView() {
   );
 }
 
+function PdfReader({ url, title }) {
+  const canvasRef = useRef(null);
+  const renderTaskRef = useRef(null);
+  const loadingTaskRef = useRef(null);
+  const [pdf, setPdf] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [scale, setScale] = useState(1.1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPdf(null);
+    setPageNumber(1);
+    setLoading(true);
+    setError(null);
+
+    const loadPdf = async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`No se pudo leer el PDF (${response.status}).`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const pdfjsLib = await loadPdfjs();
+        if (cancelled) return;
+        const loadingTask = pdfjsLib.getDocument({ data: bytes });
+        loadingTaskRef.current = loadingTask;
+        const loadedPdf = await loadingTask.promise;
+        if (!cancelled) setPdf(loadedPdf);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "No se pudo abrir este PDF.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadPdf();
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      loadingTaskRef.current?.destroy();
+      loadingTaskRef.current = null;
+    };
+  }, [url]);
+
+  useEffect(() => {
+    if (!pdf || !canvasRef.current) return undefined;
+    let cancelled = false;
+    renderTaskRef.current?.cancel();
+
+    const renderPage = async () => {
+      try {
+        const page = await pdf.getPage(pageNumber);
+        if (cancelled || !canvasRef.current) return;
+        const viewport = page.getViewport({ scale });
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d");
+        const outputScale = window.devicePixelRatio || 1;
+        canvas.width = Math.ceil(viewport.width * outputScale);
+        canvas.height = Math.ceil(viewport.height * outputScale);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        renderTaskRef.current = page.render({
+          canvasContext: context,
+          viewport,
+          transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
+        });
+        await renderTaskRef.current.promise;
+      } catch (err) {
+        if (!cancelled && err.name !== "RenderingCancelledException") setError("No se pudo renderizar esta página del PDF.");
+      }
+    };
+
+    renderPage();
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+    };
+  }, [pdf, pageNumber, scale]);
+
+  return (
+    <div className="board-pdf-reader">
+      {pdf && (
+        <div className="board-pdf-toolbar" aria-label="Controles del lector PDF">
+          <button type="button" title="Página anterior" aria-label="Página anterior" disabled={pageNumber <= 1} onClick={() => setPageNumber((page) => Math.max(1, page - 1))}>‹</button>
+          <span className="board-pdf-page">Página {pageNumber} de {pdf.numPages}</span>
+          <button type="button" title="Página siguiente" aria-label="Página siguiente" disabled={pageNumber >= pdf.numPages} onClick={() => setPageNumber((page) => Math.min(pdf.numPages, page + 1))}>›</button>
+          <span className="board-pdf-toolbar-spacer" />
+          <button type="button" title="Alejar" aria-label="Alejar" disabled={scale <= 0.65} onClick={() => setScale((value) => Math.max(0.65, +(value - 0.15).toFixed(2)))}>−</button>
+          <span className="board-pdf-zoom">{Math.round(scale * 100)}%</span>
+          <button type="button" title="Acercar" aria-label="Acercar" disabled={scale >= 1.8} onClick={() => setScale((value) => Math.min(1.8, +(value + 0.15).toFixed(2)))}>+</button>
+        </div>
+      )}
+      <div className="board-pdf-page-stage">
+        {loading && <div className="board-doc-placeholder">Preparando vista previa segura…</div>}
+        {!loading && error && <div className="board-doc-placeholder" role="alert">{error}</div>}
+        {!loading && !error && pdf && <canvas ref={canvasRef} className="board-pdf-canvas" aria-label={`${title}, página ${pageNumber}`} />}
+      </div>
+    </div>
+  );
+}
+
+function SeriesATaskForm({ initial, onSave, onClose }) {
+  const [task, setTask] = useState({ ...initial });
+  const set = (key) => (event) => setTask((current) => ({ ...current, [key]: event.target.value }));
+  const valid = task.title.trim();
+  return (
+    <Modal title={task.id ? "Edit Series A task" : "Add Series A task"} onClose={onClose} width={700}>
+      <div className="board-task-form-grid">
+        <Field label="Task"><input style={inputStyle} autoFocus value={task.title} onChange={set("title")} /></Field>
+        <Field label="Owner"><input style={inputStyle} value={task.owner || ""} onChange={set("owner")} placeholder="Role or person" /></Field>
+        <Field label="Due date"><input type="date" style={inputStyle} value={task.dueDate || ""} onChange={set("dueDate")} /></Field>
+        <Field label="Status">
+          <select style={inputStyle} value={task.status || "Open"} onChange={set("status")}>
+            <option>Open</option><option>In progress</option><option>Done</option>
+          </select>
+        </Field>
+        <Field label="Source / agreement"><input style={inputStyle} value={task.source || ""} onChange={set("source")} placeholder="e.g. IRA 5.12" /></Field>
+        <Field label="Recurring obligation">
+          <select style={inputStyle} value={task.recurring ? "yes" : "no"} onChange={(event) => setTask((current) => ({ ...current, recurring: event.target.value === "yes" }))}>
+            <option value="no">One-time</option><option value="yes">Recurring / event-driven</option>
+          </select>
+        </Field>
+        {task.recurring && <Field label="Due cadence"><input style={inputStyle} value={task.dueLabel || ""} onChange={set("dueLabel")} placeholder="Monthly · within 30 days" /></Field>}
+        <div className="board-task-form-wide"><Field label="Details"><textarea style={{ ...inputStyle, minHeight: 100, resize: "vertical" }} value={task.details || ""} onChange={set("details")} /></Field></div>
+      </div>
+      <div className="board-task-form-actions">
+        <Btn kind="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn disabled={!valid} onClick={() => onSave({ ...task, title: task.title.trim(), dueDate: task.dueDate || null })}>Save task</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function SeriesATasksView() {
+  const [tasks, setTasks] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [filter, setFilter] = useState("Open");
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [attachmentPreview, setAttachmentPreview] = useState(null);
+  const uploadRef = useRef(null);
+  const selectedTask = tasks.find((task) => task.id === selectedId);
+
+  const request = async (action, payload = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
+    const response = await fetch("/.netlify/functions/series-a-tasks", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not complete task action.");
+    return result;
+  };
+
+  const loadTasks = async () => {
+    setError(null);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
+    const response = await fetch("/.netlify/functions/series-a-tasks?action=list", { headers: { Authorization: `Bearer ${session.access_token}` } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not load Series A tasks.");
+    setTasks(result.tasks || []);
+    setSelectedId((current) => current && result.tasks.some((task) => task.id === current) ? current : result.tasks[0]?.id || null);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setBusy(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
+        const response = await fetch("/.netlify/functions/series-a-tasks?action=list", { headers: { Authorization: `Bearer ${session.access_token}` } });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not load Series A tasks.");
+        if (!cancelled) {
+          setTasks(result.tasks || []);
+          setSelectedId(result.tasks?.[0]?.id || null);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Could not load Series A tasks.");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const filteredTasks = tasks
+    .filter((task) => filter === "All" || (filter === "Recurring" ? task.recurring : task.status === filter))
+    .filter((task) => `${task.title} ${task.owner} ${task.source} ${task.details}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31"));
+
+  const saveTask = async (task) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await request("save-task", { task });
+      setTasks((current) => {
+        const exists = current.some((item) => item.id === result.task.id);
+        return exists ? current.map((item) => item.id === result.task.id ? result.task : item) : [...current, result.task];
+      });
+      setSelectedId(result.task.id);
+      setEditing(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateStatus = async (status) => {
+    if (!selectedTask) return;
+    setBusy(true);
+    try {
+      const result = await request("save-task", { task: { ...selectedTask, status } });
+      setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedTask) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const upload = await request("create-upload", { taskId: selectedTask.id, fileName: file.name, contentType: file.type, fileSize: file.size });
+      const response = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "false" },
+        body: file,
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.message || result?.error || `Secure file upload failed (${response.status}).`);
+      }
+      const result = await request("add-attachment", { taskId: selectedTask.id, attachment: { path: upload.path, name: file.name, contentType: file.type || "application/octet-stream", size: file.size } });
+      setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
+    } catch (err) {
+      setError(err.message || "Could not attach file.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openAttachment = async (attachment) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await request("open-attachment", { taskId: selectedTask.id, attachmentId: attachment.id });
+      setAttachmentPreview({ ...attachment, url: result.url });
+    } catch (err) {
+      setError(err.message || "Could not open attachment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAttachment = async (attachment) => {
+    if (!window.confirm(`Remove ${attachment.name}?`)) return;
+    setBusy(true);
+    try {
+      const result = await request("remove-attachment", { taskId: selectedTask.id, attachmentId: attachment.id });
+      setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
+      if (attachmentPreview?.id === attachment.id) setAttachmentPreview(null);
+    } catch (err) {
+      setError(err.message || "Could not remove attachment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteTask = async () => {
+    if (!selectedTask || !window.confirm(`Delete task “${selectedTask.title}” and its attachments?`)) return;
+    setBusy(true);
+    try {
+      await request("delete-task", { taskId: selectedTask.id });
+      setTasks((current) => current.filter((task) => task.id !== selectedTask.id));
+      setSelectedId(null);
+      setAttachmentPreview(null);
+    } catch (err) {
+      setError(err.message || "Could not delete task.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const formatDue = (task) => task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : task.dueLabel || "No due date";
+
+  return (
+    <section className="board-tasks">
+      <div className="board-docs-heading">
+        <div>
+          <div className="board-eyebrow">BOARD · SERIES A</div>
+          <h1>Series A Tasks</h1>
+          <p>Post-closing follow-ups from Celes_Series_A_Closing_Record.</p>
+        </div>
+        <button className="board-task-add" onClick={() => setEditing({ title: "", owner: "", dueDate: "", dueLabel: "", source: "", details: "", status: "Open", recurring: false, attachments: [] })}>+ Add task</button>
+      </div>
+
+      <div className="board-task-note">Working checklist based on the closing record; confirm legal and tax interpretations with counsel.</div>
+      {error && <div className="board-doc-error" role="alert">{error}</div>}
+
+      <div className="board-task-toolbar">
+        <label className="board-doc-search board-task-search">
+          <span className="sr-only">Search tasks</span>
+          <input type="search" placeholder="Search tasks, owners or sources" value={search} onChange={(event) => setSearch(event.target.value)} />
+        </label>
+        <div className="board-task-filters" aria-label="Filter tasks">
+          {["Open", "In progress", "Recurring", "Done", "All"].map((value) => (
+            <button key={value} className={filter === value ? "is-active" : ""} onClick={() => setFilter(value)}>{value}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="board-tasks-layout">
+        <div className="board-task-list" aria-label="Series A tasks">
+          <div className="board-doc-list-meta">{filteredTasks.length} TASKS</div>
+          {busy && !tasks.length ? <div className="board-doc-empty">Loading tasks…</div> : filteredTasks.length ? filteredTasks.map((task) => (
+            <button key={task.id} className={`board-task-row${selectedId === task.id ? " is-selected" : ""}`} onClick={() => { setSelectedId(task.id); setAttachmentPreview(null); }}>
+              <span className={`board-task-status-dot status-${task.status.toLowerCase().replaceAll(" ", "-")}`} />
+              <span className="board-task-row-main">
+                <span className="board-task-row-title">{task.title}</span>
+                <span className="board-task-row-meta">{task.owner || "Unassigned"} · {formatDue(task)}</span>
+              </span>
+              {task.recurring && <span className="board-task-recurring">↻</span>}
+            </button>
+          )) : <div className="board-doc-empty">No tasks match this view.</div>}
+        </div>
+
+        <div className="board-task-detail">
+          {selectedTask ? (
+            <>
+              <div className="board-task-detail-header">
+                <div>
+                  <div className="board-eyebrow">{selectedTask.recurring ? "RECURRING OBLIGATION" : selectedTask.dueDate ? "POST-CLOSING FOLLOW-UP" : "SERIES A TASK"}</div>
+                  <h2>{selectedTask.title}</h2>
+                </div>
+                <div className="board-task-detail-actions">
+                  <button onClick={() => setEditing({ ...selectedTask })}>Edit</button>
+                  <button className="is-danger" onClick={deleteTask} disabled={busy}>Delete</button>
+                </div>
+              </div>
+              <div className="board-task-facts">
+                <div><span>OWNER</span><b>{selectedTask.owner || "Unassigned"}</b></div>
+                <div><span>DUE</span><b>{formatDue(selectedTask)}</b></div>
+                <div><span>SOURCE</span><b>{selectedTask.source || "—"}</b></div>
+                <div><span>STATUS</span><select value={selectedTask.status} disabled={busy} onChange={(event) => updateStatus(event.target.value)}><option>Open</option><option>In progress</option><option>Done</option></select></div>
+              </div>
+              <div className="board-task-details-text">{selectedTask.details}</div>
+
+              <div className="board-task-attachments-header">
+                <div><h3>Attachments</h3><span>{selectedTask.attachments?.length || 0} files</span></div>
+                <input ref={uploadRef} type="file" className="sr-only" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp" onChange={addAttachment} />
+                <button className="board-task-add-file" disabled={busy} onClick={() => uploadRef.current?.click()}>+ Attach files</button>
+              </div>
+              <div className="board-task-attachments">
+                {selectedTask.attachments?.length ? selectedTask.attachments.map((attachment) => (
+                  <div className="board-task-attachment" key={attachment.id}>
+                    <span className="board-pdf-icon">{attachment.contentType?.includes("pdf") ? "PDF" : "FILE"}</span>
+                    <button className="board-task-attachment-name" onClick={() => openAttachment(attachment)}>{attachment.name}</button>
+                    <span className="board-task-file-size">{(attachment.size / (1024 * 1024)).toFixed(2)} MB</span>
+                    <button className="board-task-remove-file" title="Remove attachment" aria-label={`Remove ${attachment.name}`} disabled={busy} onClick={() => removeAttachment(attachment)}>×</button>
+                  </div>
+                )) : <div className="board-task-no-files">No files attached to this task.</div>}
+              </div>
+
+              {attachmentPreview && (
+                <div className="board-task-attachment-preview">
+                  <div className="board-doc-viewer-header">
+                    <div className="board-doc-viewer-title">{attachmentPreview.name}</div>
+                    <button onClick={() => setAttachmentPreview(null)}>Close preview</button>
+                  </div>
+                  {attachmentPreview.contentType?.includes("pdf") ? (
+                    <PdfReader key={attachmentPreview.id} url={attachmentPreview.url} title={attachmentPreview.name} />
+                  ) : attachmentPreview.contentType?.startsWith("image/") ? (
+                    <img src={attachmentPreview.url} alt={attachmentPreview.name} />
+                  ) : (
+                    <div className="board-doc-placeholder">Preview is unavailable for this file type. <a href={attachmentPreview.url} target="_blank" rel="noreferrer">Open file</a></div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="board-doc-placeholder">Select a task to view its follow-up details.</div>
+          )}
+        </div>
+      </div>
+      {editing && <SeriesATaskForm initial={editing} onClose={() => setEditing(null)} onSave={saveTask} />}
+    </section>
+  );
+}
+
+function BoardWorkspace() {
+  const [section, setSection] = useState("legal-series-a");
+  const [entitiesOpen, setEntitiesOpen] = useState(true);
+  const [documents, setDocuments] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [loadingList, setLoadingList] = useState(true);
+  const [loadingDocument, setLoadingDocument] = useState(false);
+  const [error, setError] = useState(null);
+  const selectedDocument = documents.find((document) => document.id === selectedId);
+  const visibleDocuments = documents.filter((document) => document.name.toLowerCase().includes(search.toLowerCase()));
+  const entitySections = [
+    { id: "entity-celes-us", label: "Celes (US)" },
+    { id: "entity-biai-colombia", label: "Biai (Colombia)" },
+    { id: "entity-xeles-mexico", label: "Xeles (Mexico)" },
+    { id: "entity-celes-chile", label: "Celes (Chile)" },
+  ];
+  const selectedEntity = entitySections.find((entity) => entity.id === section);
+
+  useEffect(() => {
+    if (section !== "legal-series-a") return undefined;
+    let cancelled = false;
+    const loadDocuments = async () => {
+      setLoadingList(true);
+      setError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Inicia sesión para consultar los documentos.");
+        const response = await fetch("/.netlify/functions/series-a-documents?action=list", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "No se pudo cargar la lista de documentos.");
+        if (!cancelled) {
+          setDocuments(result.documents || []);
+          setSelectedId((current) => current || result.documents?.[0]?.id || null);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message || "No se pudo cargar la lista de documentos.");
+      } finally {
+        if (!cancelled) setLoadingList(false);
+      }
+    };
+    loadDocuments();
+    return () => { cancelled = true; };
+  }, [section]);
+
+  useEffect(() => {
+    if (section !== "legal-series-a" || !selectedId) return undefined;
+    let cancelled = false;
+    const loadDocument = async () => {
+      setLoadingDocument(true);
+      setPreviewUrl(null);
+      setError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+        const response = await fetch(`/.netlify/functions/series-a-documents?documentId=${encodeURIComponent(selectedId)}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "No se pudo abrir el documento.");
+        if (!cancelled) setPreviewUrl(result.url);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "No se pudo abrir el documento.");
+      } finally {
+        if (!cancelled) setLoadingDocument(false);
+      }
+    };
+    loadDocument();
+    return () => { cancelled = true; };
+  }, [section, selectedId]);
+
+  return (
+    <section className="board-workspace">
+      <aside className="board-section-nav" aria-label="Secciones de Board">
+        <div className="board-section-nav-title">BOARD</div>
+        <button className={`board-section-link${section === "legal-series-a" ? " is-active" : ""}`} aria-current={section === "legal-series-a" ? "page" : undefined} onClick={() => setSection("legal-series-a")}>
+          <span className="board-section-icon" aria-hidden="true">▤</span> Legal Docs Series A
+        </button>
+        <button className={`board-section-link${section === "series-a-tasks" ? " is-active" : ""}`} aria-current={section === "series-a-tasks" ? "page" : undefined} onClick={() => setSection("series-a-tasks")}>
+          <span className="board-section-icon" aria-hidden="true">☑</span> Series A Tasks
+        </button>
+        <button className="board-section-link board-section-parent" aria-expanded={entitiesOpen} onClick={() => setEntitiesOpen((open) => !open)}>
+          <span className="board-section-icon" aria-hidden="true">⌂</span> Local entities <span className="board-section-chevron">{entitiesOpen ? "▾" : "▸"}</span>
+        </button>
+        {entitiesOpen && (
+          <div className="board-entity-links">
+            {entitySections.map((entity) => (
+              <button key={entity.id} className={`board-section-link board-entity-link${section === entity.id ? " is-active" : ""}`} aria-current={section === entity.id ? "page" : undefined} onClick={() => setSection(entity.id)}>
+                {entity.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      <div className="board-section-content">
+        {section === "legal-series-a" ? (
+          <div className="board-docs">
+            <div className="board-docs-heading">
+              <div>
+                <div className="board-eyebrow">BOARD · DOCUMENT ROOM</div>
+                <h1>Legal Docs Series A</h1>
+                <p>Documentos legales de Series A y societarios de Celes.</p>
+              </div>
+              <div className="board-doc-count">{documents.length} documentos</div>
+            </div>
+
+            {error && <div className="board-doc-error" role="alert">{error}</div>}
+
+            <div className="board-docs-layout">
+              <aside className="board-doc-list" aria-label="Documentos legales">
+                <label className="board-doc-search">
+                  <span className="sr-only">Buscar documentos</span>
+                  <input type="search" placeholder="Buscar documentos" value={search} onChange={(event) => setSearch(event.target.value)} />
+                </label>
+                <div className="board-doc-list-meta">SERIES A · SOCIETARIOS</div>
+                {loadingList ? (
+                  <div className="board-doc-empty">Cargando documentos…</div>
+                ) : visibleDocuments.length ? visibleDocuments.map((document) => (
+                  <button key={document.id} className={`board-doc-item${selectedId === document.id ? " is-selected" : ""}`} onClick={() => setSelectedId(document.id)}>
+                    <span className="board-pdf-icon" aria-hidden="true">PDF</span>
+                    <span className="board-doc-name">{document.name}</span>
+                  </button>
+                )) : (
+                  <div className="board-doc-empty">No hay documentos que coincidan con la búsqueda.</div>
+                )}
+                <div className="board-doc-private">Acceso interno · archivos privados</div>
+              </aside>
+
+              <div className="board-doc-viewer">
+                {selectedDocument ? (
+                  <>
+                    <div className="board-doc-viewer-header">
+                      <div className="board-doc-viewer-title" title={selectedDocument.name}>{selectedDocument.name}</div>
+                      <div className="board-doc-viewer-state">{loadingDocument ? "Abriendo…" : previewUrl ? "Vista protegida" : ""}</div>
+                    </div>
+                    {previewUrl ? (
+                      <PdfReader key={selectedId} url={previewUrl} title={selectedDocument.name} />
+                    ) : (
+                      <div className="board-doc-placeholder">{loadingDocument ? "Preparando vista previa segura…" : error ? "No se pudo cargar la vista previa." : "Selecciona un documento para leerlo aquí."}</div>
+                    )}
+                  </>
+                ) : (
+                  <div className="board-doc-placeholder">Selecciona un documento para leerlo aquí.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : section === "series-a-tasks" ? (
+          <SeriesATasksView />
+        ) : (
+          <section className="board-section-placeholder">
+            <div className="board-eyebrow">BOARD · {selectedEntity ? "LOCAL ENTITIES" : "SERIES A"}</div>
+            <h1>{selectedEntity?.label || "Series A Tasks"}</h1>
+            <p>{selectedEntity ? `Espacio de trabajo para documentos y tareas de ${selectedEntity.label}.` : "Seguimiento de tareas y pendientes de la ronda Series A."}</p>
+            <div className="board-empty-state">No hay contenido en esta sección todavía.</div>
+          </section>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /* ============================= SEED → STATE ============================= */
 function buildInitialState() {
   const todayReal = iso(new Date());
   return {
-    assumptions: { today: todayReal, opening: 820000, escalation: 0.1, defaultDelay: 30 },
+    assumptions: { today: todayReal, autoToday: true, opening: 820000, escalation: 0.1, defaultDelay: 30 },
     clients: SEED.clients.map((c) => ({ ...c, delay: c.delay || 30 })),
+    investments: [],
     /* drop $0 rows caused by #NUM! formula errors in the original Excel */
     invoices: SEED.invoices.filter((v) => v.amt > 0).map((v) => ({ ...v, id: nid(), auto: false })),
     outflows: JSON.parse(JSON.stringify(SEED.outflows)),
@@ -1014,6 +1856,8 @@ function buildInitialState() {
 /* ============================= NAV ============================= */
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "◧" },
+  { id: "reports", label: "Reports", icon: "▧" },
+  { id: "investments", label: "Investment", icon: "$" },
   { id: "clients", label: "Master Clients", icon: "▤" },
   { id: "invoices", label: "Invoice Schedule", icon: "☰" },
   { id: "weekly", label: "Weekly Cash Flow", icon: "▥" },
@@ -1028,6 +1872,7 @@ const NAV = [
 /* ============================= APP ============================= */
 export default function App() {
   const [state, setState] = useState(buildInitialState);
+  const [module, setModule] = useState("home");
   const [view, setView] = useState("dashboard");
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1037,7 +1882,20 @@ export default function App() {
   const loadShared = async () => {
     try {
       const s = await loadState();
-      if (s && s.clients && s.invoices) { setState(s); setSaved(true); return true; }
+      if (s && s.clients && s.invoices) {
+        const autoToday = s.assumptions?.autoToday !== false;
+        setState({
+          ...s,
+          investments: s.investments || [],
+          assumptions: {
+            ...s.assumptions,
+            autoToday,
+            ...(autoToday ? { today: iso(new Date()) } : {}),
+          },
+        });
+        setSaved(true);
+        return true;
+      }
     } catch (e) { /* first run */ }
     return false;
   };
@@ -1058,6 +1916,20 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [state, loaded]);
 
+  useEffect(() => {
+    if (!loaded || state.assumptions.autoToday === false) return;
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+    const timer = setTimeout(() => {
+      const today = iso(new Date());
+      setState((s) => s.assumptions.autoToday && s.assumptions.today !== today
+        ? { ...s, assumptions: { ...s.assumptions, today } }
+        : s);
+    }, midnight.getTime() - now.getTime() + 50);
+    return () => clearTimeout(timer);
+  }, [loaded, state.assumptions.autoToday, state.assumptions.today]);
+
   const resetAll = async () => {
     try { await clearState(); } catch (e) {}
     setState(buildInitialState());
@@ -1071,31 +1943,98 @@ export default function App() {
   };
 
   const titles = {
-    dashboard: "Cash Flow Dashboard", clients: "Master Clients", invoices: "Invoice Schedule",
+    dashboard: "Cash Flow Dashboard", reports: "Reports", investments: "Investment", clients: "Master Clients", invoices: "Invoice Schedule",
     weekly: "Weekly Cash Flow", monthly: "Monthly Summary", outflows: "Outflow Schedule — Operating Budget",
     deferred: "Deferred Income", aging: "Accounts Receivable Aging", assumptions: "Assumptions & Settings",
     users: "Team Access",
   };
 
+  const moduleCards = [
+    { id: "cashflow", name: "Cashflow", description: "Proyección de caja, facturación, inversiones y reportes.", icon: "↗", color: "#2A5AF4" },
+    { id: "board", name: "Board", description: "Legal Docs Series A, tareas y entidades locales.", icon: "▦", color: "#2A5AF4" },
+    { id: "people", name: "People", description: "Información y procesos del equipo.", icon: "◉", color: "#2A5AF4" },
+  ];
+
+  if (module !== "cashflow") {
+    const constructionModule = moduleCards.find((item) => item.id === module);
+    return (
+      <div style={{ minHeight: "100vh", background: "#FFFFFF", color: "#0F172A", fontFamily: "Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif" }}>
+        <header style={{ height: 76, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 5.5%", borderBottom: "1px solid #E8EBF1", background: "rgba(255,255,255,.94)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <img src="/celes-logo.png" alt="Celes Technologies" style={{ display: "block", width: 96, height: 43, objectFit: "contain", objectPosition: "left center" }} />
+            <span style={{ width: 1, height: 26, background: "#E8EBF1" }} />
+            <span style={{ color: "#647084", fontSize: 13, fontWeight: 500 }}>Workspace</span>
+          </div>
+          {constructionModule && <button onClick={() => setModule("home")} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #D5DBE6", background: "#FFFFFF", borderRadius: 999, padding: "10px 16px", color: "#0F172A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← <span>Módulos</span></button>}
+        </header>
+        <main style={{ maxWidth: 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
+          {module === "board" ? (
+            <BoardWorkspace />
+          ) : constructionModule ? (
+            <section style={{ minHeight: 390, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 22, color: "#647084", fontSize: 11, fontWeight: 650, textTransform: "uppercase" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#159B76" }} /> CELES WORKSPACE
+              </div>
+              <h1 style={{ margin: 0, color: "#0F172A", fontSize: 52, lineHeight: 1.08, fontWeight: 650 }}>{constructionModule.name}</h1>
+              <div style={{ width: 46, height: 3, margin: "24px 0 18px", borderRadius: 3, background: "#2A5AF4" }} />
+              <div style={{ color: "#596579", fontSize: 17 }}>En construcción</div>
+            </section>
+          ) : (
+            <>
+              <div style={{ maxWidth: 780, margin: "0 auto 54px", textAlign: "center" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 9, marginBottom: 22, color: "#647084", fontSize: 11, fontWeight: 650, textTransform: "uppercase" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#159B76" }} /> PLATAFORMA DE OPERACIONES CELES
+                </div>
+                <h1 style={{ margin: 0, color: "#0F172A", fontSize: 52, lineHeight: 1.08, fontWeight: 650 }}>Un espacio para cada parte de <span style={{ color: "#2A5AF4" }}>Celes.</span></h1>
+                <p style={{ maxWidth: 620, margin: "18px auto 0", color: "#596579", fontSize: 16, lineHeight: 1.65 }}>Entra a tus herramientas de trabajo desde un solo lugar.</p>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, color: "#647084", fontSize: 11, fontWeight: 650, textTransform: "uppercase" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#2A5AF4" }} /> MÓDULOS
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 16 }}>
+                {moduleCards.map((item) => (
+                  <button key={item.id} onClick={() => setModule(item.id)}
+                    style={{ minHeight: 208, display: "flex", flexDirection: "column", alignItems: "stretch", padding: 22, textAlign: "left", background: "#FFFFFF", border: "1px solid #DDE2EA", borderRadius: 10, color: "#0F172A", cursor: "pointer", boxShadow: "0 3px 12px rgba(15,23,42,.035)" }}>
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+                      <span style={{ display: "inline-flex", width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 10, background: "#EEF3FF", color: item.color, fontSize: 20, fontWeight: 650 }}>{item.icon}</span>
+                      <span style={{ color: item.id === "cashflow" ? "#2A5AF4" : "#8A94A5", fontSize: 20 }} aria-hidden="true">↗</span>
+                    </span>
+                    <span style={{ display: "block", fontSize: 21, fontWeight: 650 }}>{item.name}</span>
+                    <span style={{ display: "block", marginTop: 8, color: "#596579", fontSize: 13, lineHeight: 1.55 }}>{item.description}</span>
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto", paddingTop: 18 }}>
+                      <span style={{ color: item.id === "people" ? "#647084" : "#2A5AF4", fontSize: 12, fontWeight: 600 }}>{item.id === "people" ? "En construcción" : "Abrir módulo"}</span>
+                      {item.id === "people" && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#159B76" }} />}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: T.bg, color: T.ink, fontFamily: "'Segoe UI',system-ui,-apple-system,sans-serif" }}>
+    <div className="cashflow-shell" style={{ display: "flex", minHeight: "100vh", background: T.bg, color: T.ink, fontFamily: "Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif" }}>
       {/* Sidebar */}
-      <div style={{ width: 216, minWidth: 216, background: T.side, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
-        <div style={{ padding: "20px 18px 14px", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-          <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>CELES</div>
+      <div className="cashflow-sidebar" style={{ width: 232, minWidth: 232, background: T.side, borderRight: `1px solid ${T.line}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+        <div className="cashflow-sidebar-header" style={{ padding: "18px 18px 16px", borderBottom: `1px solid ${T.line}` }}>
+          <img src="/celes-logo.png" alt="Celes Technologies" style={{ display: "block", width: 104, height: 43, objectFit: "contain", objectPosition: "left center" }} />
           <div style={{ color: T.sideInk, fontSize: 11, marginTop: 2 }}>Cash Flow Command Center</div>
+          <button onClick={() => setModule("home")} style={{ marginTop: 13, padding: 0, border: 0, background: "transparent", color: T.blue, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>← Módulos</button>
         </div>
-        <div style={{ padding: "10px 8px", flex: 1, overflowY: "auto" }}>
+        <div className="cashflow-nav" style={{ padding: "10px 8px", flex: 1, overflowY: "auto" }}>
           {NAV.map((n) => (
             <button key={n.id} onClick={() => setView(n.id)}
               style={{
                 display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
                 background: view === n.id ? T.sideActive : "transparent", border: "none",
-                borderLeft: view === n.id ? `3px solid ${T.green}` : "3px solid transparent",
-                color: view === n.id ? "#fff" : T.sideInk, padding: "10px 12px", borderRadius: 6,
-                fontSize: 13.5, fontWeight: view === n.id ? 700 : 500, cursor: "pointer", marginBottom: 2,
+                borderLeft: view === n.id ? `3px solid ${T.blue}` : "3px solid transparent",
+                color: view === n.id ? T.blue : T.sideInk, padding: "10px 12px", borderRadius: 6,
+                fontSize: 13, fontWeight: view === n.id ? 650 : 500, cursor: "pointer", marginBottom: 3,
               }}>
-              <span style={{ width: 16, textAlign: "center", opacity: 0.8 }}>{n.icon}</span>
+              <span style={{ width: 16, textAlign: "center", opacity: 0.85 }}>{n.icon}</span>
               <span style={{ flex: 1 }}>{n.label}</span>
               {badges[n.id] && (
                 <span style={{ background: badges[n.id].c, color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 7px" }}>{badges[n.id].n}</span>
@@ -1103,20 +2042,20 @@ export default function App() {
             </button>
           ))}
         </div>
-        <div style={{ padding: "12px 18px", borderTop: "1px solid rgba(255,255,255,.08)", fontSize: 11, color: T.sideInk }}>
-          <div>As of <b style={{ color: "#fff" }}>{fmtD(M.today)}</b></div>
-          <div style={{ marginTop: 3 }}>{saved ? "● Synced — shared data" : "○ Not syncing (in-memory)"}</div>
+        <div className="cashflow-sidebar-footer" style={{ padding: "13px 16px", borderTop: `1px solid ${T.line}`, fontSize: 11, color: T.sideInk }}>
+          <div>As of <b style={{ color: T.ink }}>{fmtD(M.today)}</b></div>
+          <div style={{ marginTop: 5, color: saved ? T.green : T.sub }}>{saved ? "● Synced — shared data" : "○ Not syncing (in-memory)"}</div>
           <button onClick={loadShared}
-            style={{ marginTop: 8, width: "100%", background: "transparent", border: "1px solid rgba(255,255,255,.25)", color: "#fff", borderRadius: 6, padding: "5px 8px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+            style={{ marginTop: 9, width: "100%", background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 6, padding: "7px 8px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
             ⟳ Sync latest changes
           </button>
         </div>
       </div>
 
       {/* Main */}
-      <div style={{ flex: 1, padding: "22px 26px", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 21, fontWeight: 800 }}>{titles[view]}</div>
+      <div className="cashflow-main" style={{ flex: 1, padding: "26px 30px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 22, paddingBottom: 16, borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 22, fontWeight: 650, letterSpacing: 0, color: T.ink }}>{titles[view]}</div>
           <div style={{ fontSize: 12.5, color: T.sub, fontFamily: T.mono }}>
             Balance today ≈ <b style={{ color: M.kpi.minWeek && M.weeks.find(w => w.ws <= M.today && w.we >= M.today)?.projBal < 0 ? T.red : T.ink }}>
               {fmtK(M.weeks.find((w) => w.ws <= M.today && w.we >= M.today)?.projBal ?? state.assumptions.opening)}
@@ -1124,6 +2063,8 @@ export default function App() {
           </div>
         </div>
         {view === "dashboard" && <DashboardView M={M} A={state.assumptions} go={setView} />}
+        {view === "reports" && <ReportsView M={M} />}
+          {view === "investments" && <InvestmentsView state={state} setState={setState} today={M.today} />}
         {view === "clients" && <ClientsView state={state} setState={setState} M={M} />}
         {view === "invoices" && <InvoicesView state={state} setState={setState} M={M} />}
         {view === "weekly" && <WeeklyView M={M} />}
