@@ -1,4 +1,4 @@
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -51,15 +51,6 @@ const runNetlify = (args, label) => {
   if (result.status !== 0) throw new Error(`${label} failed`);
 };
 
-const secretsPath = resolve(process.cwd(), "netlify/functions/series-a-secrets.json");
-writeFileSync(secretsPath, JSON.stringify({
-  SUPABASE_URL: localEnv.VITE_SUPABASE_URL,
-  SUPABASE_ANON_KEY: localEnv.VITE_SUPABASE_ANON_KEY,
-  SUPABASE_SERVICE_ROLE_KEY: localEnv.SUPABASE_SERVICE_ROLE_KEY,
-}), { flag: "wx", mode: 0o600 });
-
-try {
-  runNetlify(["deploy", "--prod", "--dir=dist", "--skip-functions-cache", "--site", localEnv.NETLIFY_SITE_ID], "Deploying production site and private function package");
-} finally {
-  unlinkSync(secretsPath);
-}
+// Board functions read SUPABASE_SERVICE_ROLE_KEY (and the VITE_ Supabase URL/anon key)
+// from the Netlify site environment, so no credentials are packaged with them.
+runNetlify(["deploy", "--prod", "--dir=dist", "--skip-functions-cache", "--site", localEnv.NETLIFY_SITE_ID], "Deploying production site and functions");

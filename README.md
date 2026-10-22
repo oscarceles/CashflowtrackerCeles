@@ -97,11 +97,10 @@ quitar gente del equipo, usa **Administración → Miembros** dentro de la app
 4. Agregar la URL final (Netlify/Vercel) en Supabase → Authentication → URL
    Configuration para que el magic link redirija bien.
 
-Las funciones de Board (`netlify/functions/`) necesitan además `SUPABASE_URL`,
-`SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` en el servidor. Hoy esas
-credenciales se empaquetan con `node scripts/deploy-production.mjs` (despliegue
-manual desde local con `.env`); un build automático desde GitHub sin esas
-variables deja las funciones de Board respondiendo "not configured" (503).
+Las funciones de Board (`netlify/functions/`) necesitan además
+`SUPABASE_SERVICE_ROLE_KEY` en las variables de entorno del sitio (y usan
+`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` si no hay `SUPABASE_URL` /
+`SUPABASE_ANON_KEY`). Sin esa clave responden "not configured" (503).
 
 ## Notas de diseño
 

@@ -16,12 +16,6 @@ const allowedAttachmentTypes = new Set([
   "image/gif",
   "image/webp",
 ]);
-let deploymentSecrets = {};
-try {
-  deploymentSecrets = require("./series-a-secrets.json");
-} catch {
-  deploymentSecrets = {};
-}
 
 const tasks = [
   { id: "drag-along-notice", title: "Send formal drag-along notice to John", dueDate: "2026-10-22", dueLabel: "Now", owner: "Legal & Compliance", source: "Voting Agreement; SAFE", details: "Confirm the vote math in John's SAFE tranche and collect the required written consents before sending notice.", status: "Open", attachments: [] },
@@ -113,9 +107,9 @@ const cleanFileName = (value) => String(value || "attachment")
 exports.handler = async (event) => {
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") return jsonResponse(405, { error: "Method not allowed" });
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || deploymentSecrets.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || deploymentSecrets.SUPABASE_ANON_KEY;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || deploymentSecrets.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !anonKey || !serviceKey) return jsonResponse(503, { error: "Document service is not configured" });
 
   const authorization = event.headers.authorization || event.headers.Authorization || "";
