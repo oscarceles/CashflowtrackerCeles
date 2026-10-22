@@ -246,7 +246,13 @@ export default function AuthGate({ children }) {
       return;
     }
     setNotAllowed(null);
-    setMember(record);
+    // Google sign-in provides the profile name and photo in user_metadata.
+    const meta = s.user.user_metadata || {};
+    setMember({
+      ...record,
+      display_name: record.full_name || meta.full_name || meta.name || null,
+      avatar_url: meta.avatar_url || meta.picture || null,
+    });
     setSession(s);
   }
 

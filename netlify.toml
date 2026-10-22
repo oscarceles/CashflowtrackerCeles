@@ -6,11 +6,12 @@
   directory = "netlify/functions"
 
 # Security headers for every response. The CSP only allows this site and the
-# project's Supabase API (auth, database, storage signed URLs).
+# project's Supabase API (auth, database, storage signed URLs), plus Google
+# profile photos for the account menu.
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://znlxlffuoiycoiwzgpjh.supabase.co; font-src 'self' data:; connect-src 'self' https://znlxlffuoiycoiwzgpjh.supabase.co wss://znlxlffuoiycoiwzgpjh.supabase.co; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://znlxlffuoiycoiwzgpjh.supabase.co https://*.googleusercontent.com; font-src 'self' data:; connect-src 'self' https://znlxlffuoiycoiwzgpjh.supabase.co wss://znlxlffuoiycoiwzgpjh.supabase.co; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"

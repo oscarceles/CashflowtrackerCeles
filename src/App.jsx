@@ -9,6 +9,7 @@ import { loadState, saveState, clearState } from "./storage";
 import { supabase } from "./supabaseClient";
 import { useMember, canView, canEdit, isSuperAdmin } from "./access";
 import AdminWorkspace from "./Admin";
+import UserMenu from "./UserMenu";
 
 // True when the signed-in member can only view the current module.
 const ReadOnlyContext = React.createContext(false);
@@ -1877,9 +1878,10 @@ export default function App() {
     { id: "cashflow", name: "Cashflow", description: "Proyección de caja, facturación, inversiones y reportes.", icon: "↗", color: "#2A5AF4" },
     { id: "board", name: "Board", description: "Legal Docs Series A, tareas y entidades locales.", icon: "▦", color: "#2A5AF4" },
     { id: "people", name: "People", description: "Información y procesos del equipo.", icon: "◉", color: "#2A5AF4" },
-    { id: "admin", name: "Administración", description: "Miembros, roles y acceso a los módulos.", icon: "◈", color: "#2A5AF4" },
-  ].filter((item) => item.id === "admin" ? isSuperAdmin(member) : canView(member, item.id));
-  const hasAccess = (id) => moduleCards.some((item) => item.id === id);
+  ].filter((item) => canView(member, item.id));
+  // Administración lives in the profile menu (top right), only for Super Admin.
+  const hasAccess = (id) => id === "admin" ? isSuperAdmin(member) : moduleCards.some((item) => item.id === id);
+  const openAdmin = () => setModule("admin");
 
   if (module !== "cashflow" || !hasAccess("cashflow")) {
     const constructionModule = moduleCards.find((item) => item.id === module);
@@ -1891,7 +1893,10 @@ export default function App() {
             <span style={{ width: 1, height: 26, background: "#E8EBF1" }} />
             <span style={{ color: "#647084", fontSize: 13, fontWeight: 500 }}>Workspace</span>
           </div>
-          {constructionModule && <button onClick={() => setModule("home")} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #D5DBE6", background: "#FFFFFF", borderRadius: 999, padding: "10px 16px", color: "#0F172A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← <span>Módulos</span></button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {(constructionModule || (module === "admin" && hasAccess("admin"))) && <button onClick={() => setModule("home")} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #D5DBE6", background: "#FFFFFF", borderRadius: 999, padding: "10px 16px", color: "#0F172A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← <span>Módulos</span></button>}
+            <UserMenu onAdmin={openAdmin} />
+          </div>
         </header>
         <main style={{ maxWidth: 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
           {module === "board" && hasAccess("board") ? (
@@ -1987,12 +1992,15 @@ export default function App() {
 
       {/* Main */}
       <div className="cashflow-main" style={{ flex: 1, padding: "26px 30px", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 22, paddingBottom: 16, borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, paddingBottom: 16, borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 22, fontWeight: 650, letterSpacing: 0, color: T.ink }}>{titles[view]}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginLeft: "auto" }}>
           <div style={{ fontSize: 12.5, color: T.sub, fontFamily: T.mono }}>
             Balance today ≈ <b style={{ color: M.kpi.minWeek && M.weeks.find(w => w.ws <= M.today && w.we >= M.today)?.projBal < 0 ? T.red : T.ink }}>
               {fmtK(M.weeks.find((w) => w.ws <= M.today && w.we >= M.today)?.projBal ?? state.assumptions.opening)}
             </b> · Overdue {fmtK(M.kpi.overdueAmt)}
+          </div>
+          <UserMenu onAdmin={openAdmin} />
           </div>
         </div>
         {!cashflowEditable && (

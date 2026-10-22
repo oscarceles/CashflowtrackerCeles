@@ -1215,3 +1215,100 @@
   .admin-search { max-width: none; }
   .admin-member-form { padding: 16px; }
 }
+
+/* ---------- Profile menu (top right) ---------- */
+.user-menu { position: relative; flex: none; }
+
+.user-menu-trigger {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid #d5dbe6;
+  border-radius: 50%;
+  color: #1746d1;
+  background: #eef3ff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.user-menu-trigger:hover,
+.user-menu-trigger[aria-expanded="true"] { box-shadow: 0 0 0 3px #e3eaff; }
+.user-menu-trigger:focus-visible { outline: 2px solid #2a5af4; outline-offset: 2px; }
+
+.user-menu-trigger img,
+.user-menu-avatar-large img { width: 100%; height: 100%; object-fit: cover; }
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 280px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .12);
+}
+
+.user-menu-identity {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 8px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.user-menu-avatar-large {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  color: #1746d1;
+  background: #eef3ff;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.user-menu-identity-text { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 3px; }
+.user-menu-name { color: #0f172a; font-size: 13.5px; font-weight: 650; }
+
+.user-menu-email {
+  max-width: 190px;
+  overflow: hidden;
+  color: #647084;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #0f172a;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-menu-item span { width: 16px; color: #2a5af4; text-align: center; }
+.user-menu-item:hover { background: #f4f7fc; }
+.user-menu-item.is-danger, .user-menu-item.is-danger span { color: #c62f37; }
