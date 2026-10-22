@@ -49,7 +49,7 @@ exports.handler = async (event) => {
     if (!userResponse.ok) return jsonResponse(401, { error: "Session is invalid or expired" });
     const user = await userResponse.json();
     const email = user.email?.toLowerCase();
-    if (!email) return jsonResponse(403, { error: "Account is not authorized" });
+    if (!email || !user.email_confirmed_at) return jsonResponse(403, { error: "Account is not authorized" });
 
     const allowlistUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
     allowlistUrl.search = new URLSearchParams({ select: "email", email: `eq.${email}`, limit: "1" }).toString();
@@ -76,7 +76,7 @@ exports.handler = async (event) => {
         Authorization: `Bearer ${serviceKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ expiresIn: 900 }),
+      body: JSON.stringify({ expiresIn: 300 }),
     });
     if (!signedResponse.ok) return jsonResponse(502, { error: "Could not open this document" });
     const signedData = await signedResponse.json();
@@ -84,7 +84,7 @@ exports.handler = async (event) => {
     if (!signedUrl) return jsonResponse(502, { error: "Could not open this document" });
 
     const url = signedUrl.startsWith("http") ? signedUrl : `${supabaseUrl}/storage/v1${signedUrl}`;
-    return jsonResponse(200, { url, name: document.name, expiresIn: 900 });
+    return jsonResponse(200, { url, name: document.name, expiresIn: 300 });
   } catch {
     return jsonResponse(502, { error: "Document service is temporarily unavailable" });
   }

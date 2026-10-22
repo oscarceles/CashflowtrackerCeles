@@ -1,4 +1,6 @@
 -- Run this once in the Supabase SQL editor (Project -> SQL Editor -> New query).
+-- IMPORTANT: after this file, run security-hardening.sql. The policies below
+-- only require "signed in"; the hardening file restricts access to allowed_users.
 
 create table if not exists app_state (
   id text primary key,

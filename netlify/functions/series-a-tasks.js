@@ -77,6 +77,26 @@ const readBody = (event) => {
 
 const storageKey = (path) => path.split("/").map(encodeURIComponent).join("/");
 
+// Only paths created by create-upload are valid: series-a-tasks/<taskId>/<uuid>-<name>,
+// with no traversal segments, so an attachment can never point at another task or
+// at the Legal Docs PDFs in the same bucket.
+const safeTaskId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,120}$/.test(value);
+const isTaskAttachmentPath = (path, taskId) => {
+  if (typeof path !== "string" || !safeTaskId(taskId)) return false;
+  const segments = path.split("/");
+  return segments.length === 3
+    && segments[0] === "series-a-tasks"
+    && segments[1] === taskId
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-.+$/.test(segments[2])
+    && !segments.some((segment) => segment === "." || segment === "..");
+};
+
+const cleanFileName = (value) => String(value || "attachment")
+  .replace(/[\u0000-\u001f\u007f\\/]/g, "_")
+  .replace(/^\.+/, "_")
+  .trim()
+  .slice(0, 180) || "attachment";
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") return jsonResponse(405, { error: "Method not allowed" });
 
@@ -93,7 +113,7 @@ exports.handler = async (event) => {
     if (!userResponse.ok) return jsonResponse(401, { error: "Session is invalid or expired" });
     const user = await userResponse.json();
     const email = user.email?.toLowerCase();
-    if (!email) return jsonResponse(403, { error: "Account is not authorized" });
+    if (!email || !user.email_confirmed_at) return jsonResponse(403, { error: "Account is not authorized" });
 
     const allowlistUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
     allowlistUrl.search = new URLSearchParams({ select: "email", email: `eq.${email}`, limit: "1" }).toString();
@@ -134,11 +154,11 @@ exports.handler = async (event) => {
     if (action === "list") return jsonResponse(200, { tasks: await readTasks() });
 
     if (action === "create-upload") {
-      const taskId = String(body.taskId || "").replace(/[^a-zA-Z0-9_-]/g, "");
-      const fileName = String(body.fileName || "attachment").replace(/[\\/\0]/g, "_").slice(0, 180);
+      const taskId = body.taskId;
+      const fileName = cleanFileName(body.fileName);
       const contentType = String(body.contentType || "application/octet-stream").slice(0, 120);
       const fileSize = Number(body.fileSize || 0);
-      if (!taskId || !fileName || fileSize <= 0 || fileSize > 25 * 1024 * 1024) return jsonResponse(400, { error: "Attachment must be between 1 byte and 25 MB" });
+      if (!safeTaskId(taskId) || !Number.isFinite(fileSize) || fileSize <= 0 || fileSize > 25 * 1024 * 1024) return jsonResponse(400, { error: "Attachment must be between 1 byte and 25 MB" });
       if (!allowedAttachmentTypes.has(contentType)) return jsonResponse(415, { error: "Supported attachments: PDF, Word, Excel, CSV, TXT and common image formats." });
       if (!(await readTasks()).some((task) => task.id === taskId)) return jsonResponse(404, { error: "Task not found" });
       const path = `series-a-tasks/${taskId}/${crypto.randomUUID()}-${fileName}`;
@@ -159,10 +179,13 @@ exports.handler = async (event) => {
       const input = body.task || {};
       const now = new Date().toISOString();
       const items = await readTasks();
+      // Existing tasks keep their id; new tasks always get a server-generated id.
+      const isExisting = typeof input.id === "string" && items.some((item) => item.id === input.id);
+      const dueDate = typeof input.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) ? input.dueDate : null;
       const task = {
-        id: input.id || `task-${crypto.randomUUID()}`,
+        id: isExisting ? input.id : `task-${crypto.randomUUID()}`,
         title: String(input.title || "").trim().slice(0, 240),
-        dueDate: input.dueDate || null,
+        dueDate,
         dueLabel: String(input.dueLabel || "").slice(0, 120),
         owner: String(input.owner || "").slice(0, 240),
         source: String(input.source || "").slice(0, 240),
@@ -171,6 +194,7 @@ exports.handler = async (event) => {
         recurring: Boolean(input.recurring),
         attachments: [],
         updatedAt: now,
+        updatedBy: email,
       };
       if (!task.title) return jsonResponse(400, { error: "Task title is required" });
       const existingIndex = items.findIndex((item) => item.id === task.id);
@@ -182,13 +206,33 @@ exports.handler = async (event) => {
 
     if (action === "add-attachment") {
       const { taskId, attachment } = body;
-      if (!taskId || !attachment?.path || !attachment?.name) return jsonResponse(400, { error: "Attachment details are required" });
-      if (!attachment.path.startsWith(`series-a-tasks/${taskId}/`)) return jsonResponse(400, { error: "Attachment path does not match task" });
+      if (!attachment?.path || !attachment?.name) return jsonResponse(400, { error: "Attachment details are required" });
+      if (!isTaskAttachmentPath(attachment.path, taskId)) return jsonResponse(400, { error: "Attachment path does not match task" });
       const items = await readTasks();
       const index = items.findIndex((item) => item.id === taskId);
       if (index < 0) return jsonResponse(404, { error: "Task not found" });
       if ((items[index].attachments || []).length >= 30) return jsonResponse(400, { error: "This task already has the maximum number of attachments" });
-      items[index] = { ...items[index], attachments: [...(items[index].attachments || []), { ...attachment, id: attachment.id || crypto.randomUUID() }] };
+      if ((items[index].attachments || []).some((item) => item.path === attachment.path)) return jsonResponse(409, { error: "Attachment is already registered" });
+      // Confirm the file really was uploaded, and take its type and size from storage
+      // rather than trusting the browser.
+      const info = await fetch(`${supabaseUrl}/storage/v1/object/info/${bucket}/${storageKey(attachment.path)}`, {
+        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      });
+      if (!info.ok) return jsonResponse(400, { error: "Uploaded file was not found" });
+      const stored = await info.json();
+      const storedType = stored.content_type || stored.metadata?.mimetype || attachment.contentType;
+      const storedSize = Number(stored.size ?? stored.metadata?.size ?? attachment.size);
+      if (!allowedAttachmentTypes.has(storedType)) return jsonResponse(415, { error: "Unsupported attachment type" });
+      const record = {
+        id: crypto.randomUUID(),
+        path: attachment.path,
+        name: cleanFileName(attachment.name),
+        contentType: storedType,
+        size: Number.isFinite(storedSize) ? storedSize : 0,
+        uploadedBy: email,
+        uploadedAt: new Date().toISOString(),
+      };
+      items[index] = { ...items[index], attachments: [...(items[index].attachments || []), record] };
       await writeTasks(items);
       return jsonResponse(200, { task: items[index] });
     }
@@ -200,7 +244,7 @@ exports.handler = async (event) => {
       if (index < 0) return jsonResponse(404, { error: "Task not found" });
       const attachment = (items[index].attachments || []).find((item) => item.id === attachmentId);
       if (!attachment) return jsonResponse(404, { error: "Attachment not found" });
-      if (!attachment.path.startsWith(`series-a-tasks/${taskId}/`)) return jsonResponse(400, { error: "Attachment path does not match task" });
+      if (!isTaskAttachmentPath(attachment.path, taskId)) return jsonResponse(400, { error: "Attachment path does not match task" });
       const deleted = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${storageKey(attachment.path)}`, {
         method: "DELETE",
         headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
@@ -217,11 +261,11 @@ exports.handler = async (event) => {
       const task = items.find((item) => item.id === taskId);
       const attachment = task?.attachments?.find((item) => item.id === attachmentId);
       if (!attachment) return jsonResponse(404, { error: "Attachment not found" });
-      if (!attachment.path.startsWith(`series-a-tasks/${taskId}/`)) return jsonResponse(400, { error: "Attachment path does not match task" });
+      if (!isTaskAttachmentPath(attachment.path, taskId)) return jsonResponse(400, { error: "Attachment path does not match task" });
       const signedResponse = await fetch(`${supabaseUrl}/storage/v1/object/sign/${bucket}/${storageKey(attachment.path)}`, {
         method: "POST",
         headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ expiresIn: 900 }),
+        body: JSON.stringify({ expiresIn: 300 }),
       });
       if (!signedResponse.ok) return jsonResponse(502, { error: "Could not open attachment" });
       const signed = await signedResponse.json();
@@ -235,7 +279,7 @@ exports.handler = async (event) => {
       const task = items.find((item) => item.id === body.taskId);
       if (!task) return jsonResponse(404, { error: "Task not found" });
       for (const attachment of task.attachments || []) {
-        if (!attachment.path.startsWith(`series-a-tasks/${body.taskId}/`)) continue;
+        if (!isTaskAttachmentPath(attachment.path, body.taskId)) continue;
         await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${storageKey(attachment.path)}`, {
           method: "DELETE",
           headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },

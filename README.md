@@ -22,6 +22,8 @@ src/Auth.jsx          → pantalla de login (magic link o contraseña) y verific
 src/main.jsx          → punto de entrada de React
 src/cashflow.css      → estilos con la identidad visual de Celes
 supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
+supabase/security-hardening.sql → RLS restringida a allowed_users + hook que bloquea registros fuera de la lista (correr después de schema.sql)
+netlify.toml          → build, funciones y headers de seguridad (CSP, HSTS, anti-iframe)
 netlify/functions/    → funciones server-side de Board (documentos Series A y tareas/adjuntos)
 scripts/deploy-production.mjs → deploy a producción con las credenciales server-side de Board
 ```

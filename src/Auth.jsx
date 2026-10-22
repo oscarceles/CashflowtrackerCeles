@@ -151,7 +151,8 @@ function LoginForm({ banner }) {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={passwordMode === "signup" ? 12 : 6}
+              autoComplete={passwordMode === "signup" ? "new-password" : "current-password"}
               placeholder="Contraseña"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -233,7 +234,8 @@ export default function AuthGate({ children }) {
       setSession(null);
       return;
     }
-    const allowed = await isEmailAllowed(s.user.email);
+    // Fail closed: if the allowlist cannot be checked, treat it as not allowed.
+    const allowed = await isEmailAllowed(s.user.email).catch(() => false);
     if (!allowed) {
       setNotAllowed(s.user.email);
       await supabase.auth.signOut();

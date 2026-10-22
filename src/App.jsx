@@ -1296,7 +1296,7 @@ function PdfReader({ url, title }) {
         const bytes = new Uint8Array(await response.arrayBuffer());
         const pdfjsLib = await loadPdfjs();
         if (cancelled) return;
-        const loadingTask = pdfjsLib.getDocument({ data: bytes });
+        const loadingTask = pdfjsLib.getDocument({ data: bytes, isEvalSupported: false });
         loadingTaskRef.current = loadingTask;
         const loadedPdf = await loadingTask.promise;
         if (!cancelled) setPdf(loadedPdf);
