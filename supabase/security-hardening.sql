@@ -114,6 +114,20 @@ grant execute on function public.is_super_admin() to authenticated;
 grant execute on function public.module_access(text) to authenticated;
 
 -- 3. app_state: Cashflow record only; view to read, edit to write ----------
+-- Postgres ORs permissive policies together, so any older policy (including
+-- ones created by hand in the dashboard) would keep the tables open. Drop every
+-- existing policy on both tables before creating the role-based ones.
+do $$
+declare p record;
+begin
+  for p in
+    select policyname, tablename from pg_policies
+    where schemaname = 'public' and tablename in ('app_state', 'allowed_users')
+  loop
+    execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
+  end loop;
+end $$;
+
 drop policy if exists "Authenticated users can read app_state" on public.app_state;
 drop policy if exists "Authenticated users can insert app_state" on public.app_state;
 drop policy if exists "Authenticated users can update app_state" on public.app_state;
