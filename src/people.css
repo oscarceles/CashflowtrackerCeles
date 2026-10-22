@@ -249,3 +249,100 @@
   .people-chart-grid { grid-template-columns: minmax(0, 1fr); }
   .people-calc-actions { margin-left: 0; }
 }
+
+/* Exits (retiro + liquidación): the line stays in the month, in red */
+.people-table tr.is-exit td,
+.people-table tr.is-exit td.people-sticky { background: #fdf0f1; }
+.people-table tr.is-exit:hover td { background: #fbe5e7; }
+.people-table tr.is-exit .people-person { color: #a3242c; }
+.people-table tr.is-exit td:first-child { box-shadow: inset 3px 0 0 #d6343d; }
+
+.people-exit-badge {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 7px;
+  border: 1px solid #f1c5c8;
+  border-radius: 4px;
+  color: #a3242c;
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.people-exit-summary { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 8px; background: #fdf0f1; }
+.people-exit-summary div { display: flex; justify-content: space-between; color: #40516a; font-size: 13px; }
+.people-exit-summary b { color: #0f172a; font-variant-numeric: tabular-nums; }
+.people-exit-summary .is-total { padding-top: 6px; border-top: 1px solid #f1c5c8; font-weight: 650; }
+.people-exit-note { margin-bottom: 10px; padding: 8px 12px; border-radius: 6px; color: #a3242c; background: #fdf0f1; font-size: 12.5px; }
+
+.people-danger-button.is-solid { border-color: #c62f37; color: #fff; background: #c62f37; }
+.people-danger-button.is-solid:hover { background: #a3242c; }
+.people-modal-actions.is-split { justify-content: space-between; align-items: center; }
+.people-align-start { align-self: flex-start; }
+.people-modal.is-wide { width: min(1040px, 100%); }
+
+/* Directory */
+.people-table tr.is-clickable { cursor: pointer; }
+.people-directory-person { display: flex; align-items: center; gap: 10px; }
+
+.people-avatar {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.people-avatar.is-large { width: 52px; height: 52px; font-size: 17px; }
+
+.people-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.people-chip.is-good { color: #0f7a5c; background: #e7f6f0; }
+.people-chip.is-muted { color: #647084; background: #f1f4f8; }
+.people-chip.is-wait { color: #92400e; background: #fef3c7; }
+
+.people-birthdays { line-height: 1.6; }
+
+.people-person-header { display: flex; align-items: center; gap: 14px; }
+.people-person-header h2 { margin: 0 0 3px; color: #0f172a; font-size: 20px; font-weight: 650; }
+.people-person-header .people-chip { margin-top: 6px; }
+.people-person-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+.people-person-section { padding-top: 14px; border-top: 1px solid #eef1f5; }
+.people-person-section h3 { margin: 0 0 10px; color: #0f172a; font-size: 13.5px; font-weight: 650; }
+.people-person-section h4 { margin: 0 0 6px; color: #40516a; font-size: 12px; font-weight: 650; }
+
+.people-field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px; }
+.people-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.people-field span { color: #647084; font-size: 11px; font-weight: 600; }
+.people-field b { overflow: hidden; color: #0f172a; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+
+.people-field input,
+.people-field select,
+.people-inline-form input {
+  padding: 7px 9px;
+  border: 1px solid #dce3ed;
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.people-history { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.people-history b { font-variant-numeric: tabular-nums; }
+
+.people-inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 10px; padding: 12px; border-radius: 8px; background: #f8fafc; }
+
+@media (max-width: 760px) {
+  .people-person-header { flex-wrap: wrap; }
+  .people-person-actions { margin-left: 0; }
+}
+.people-directory td:nth-child(4) { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.people-directory td:nth-child(2) { white-space: normal; min-width: 120px; }

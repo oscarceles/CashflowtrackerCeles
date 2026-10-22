@@ -260,3 +260,117 @@ create policy "People editors write draft lines" on public.payroll_lines for all
   with check (public.module_access('people') = 'edit' and public.payroll_period_is_draft(period_id));
 
 revoke all on table public.people_employees, public.payroll_periods, public.payroll_lines from anon;
+
+-- ===================== Directory, equity, exits & Deel ======================
+
+alter table public.people_employees
+  add column if not exists legal_name text,
+  add column if not exists work_email text,
+  add column if not exists personal_email text,
+  add column if not exists phone text,
+  add column if not exists birth_date date,
+  add column if not exists country text,
+  add column if not exists city text,
+  add column if not exists shirt_size text,
+  add column if not exists pants_size text,
+  add column if not exists dietary_notes text,
+  add column if not exists notes text,
+  add column if not exists deel_contract_id text,
+  add column if not exists deel_name text,
+  add column if not exists deel_email text,
+  add column if not exists deel_contract_name text,
+  add column if not exists deel_group text;
+
+-- Sensitive personal data: readable and writable only by People editors.
+create table if not exists public.people_private (
+  employee_id uuid primary key references public.people_employees (id) on delete cascade,
+  id_number text,
+  address text,
+  neighborhood text,
+  bank text,
+  account_type text,
+  account_number text,
+  eps text,
+  emergency_name text,
+  emergency_phone text,
+  emergency_relationship text,
+  marital_status text,
+  children text,
+  data_consent boolean,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+drop trigger if exists people_private_touch on public.people_private;
+create trigger people_private_touch before insert or update on public.people_private
+  for each row execute function public.people_employee_touch();
+
+create table if not exists public.people_equity_grants (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.people_employees (id) on delete cascade,
+  grant_type text not null default 'Stock options',
+  units numeric(14, 2) not null default 0,
+  vesting_start date,
+  cliff_date date,
+  expiration_date date,
+  status text not null default 'Active',
+  signed boolean not null default false,
+  notes text,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+create index if not exists people_equity_grants_employee_idx on public.people_equity_grants (employee_id);
+drop trigger if exists people_equity_touch on public.people_equity_grants;
+create trigger people_equity_touch before insert or update on public.people_equity_grants
+  for each row execute function public.people_employee_touch();
+
+-- Exit and settlement (liquidación) recorded on the person's last payroll line.
+alter table public.payroll_lines
+  add column if not exists exit_date date,
+  add column if not exists liquidation jsonb check (liquidation is null or jsonb_typeof(liquidation) = 'object');
+
+create or replace function public.payroll_line_compute()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare adj numeric := 0;
+begin
+  if new.source = 'app' then
+    select coalesce(sum((a ->> 'usd')::numeric), 0) into adj
+    from jsonb_array_elements(new.adjustments) a;
+    new.total := round(
+      (coalesce(new.base_salary, 0) + coalesce(new.allowance, 0)) / 30 * coalesce(new.days, 0)
+      + coalesce(new.prima, 0) + coalesce(new.platform_fee, 0) + adj
+      + coalesce((new.liquidation ->> 'total')::numeric, 0), 2);
+  end if;
+  new.updated_at := now();
+  new.updated_by := lower(coalesce(auth.jwt() ->> 'email', new.updated_by));
+  return new;
+end;
+$$;
+
+alter table public.people_private enable row level security;
+alter table public.people_equity_grants enable row level security;
+
+do $$
+declare p record;
+begin
+  for p in
+    select policyname, tablename from pg_policies
+    where schemaname = 'public' and tablename in ('people_private', 'people_equity_grants')
+  loop
+    execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
+  end loop;
+end $$;
+
+create policy "People editors manage private data" on public.people_private for all to authenticated
+  using (public.module_access('people') = 'edit')
+  with check (public.module_access('people') = 'edit');
+
+create policy "People viewers read equity" on public.people_equity_grants for select to authenticated
+  using (public.module_access('people') is not null);
+create policy "People editors write equity" on public.people_equity_grants for all to authenticated
+  using (public.module_access('people') = 'edit')
+  with check (public.module_access('people') = 'edit');
+
+revoke all on table public.people_private, public.people_equity_grants from anon;

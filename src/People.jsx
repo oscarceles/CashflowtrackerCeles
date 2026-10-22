@@ -5,83 +5,11 @@ import {
 import { supabase } from "./supabaseClient";
 import { useMember, isSuperAdmin } from "./access";
 import "./people.css";
-
-/* ============================ helpers ============================ */
-
-const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-// Fixed categorical order (validated with the dataviz palette checker); color follows the area.
-const AREA_COLORS = {
-  Data: "#2a78d6", Product: "#eb6834", Sales: "#1baf7a", CS: "#eda100",
-  Growth: "#e87ba4", Implementacion: "#008300", "P&A": "#4a3aa7", "Sin área": "#e34948",
-};
-const OTHER_COLOR = "#8a94a5";
-const areaColor = (area) => AREA_COLORS[area] || OTHER_COLOR;
-
-const ADJ_TYPES = [
-  { id: "Bono", sign: 1 },
-  { id: "Comisión", sign: 1 },
-  { id: "Reembolso", sign: 1 },
-  { id: "Deducción", sign: -1 },
-  { id: "Prepagada", sign: -1 },
-  { id: "Otro", sign: 0 }, // amount keeps the sign typed by the user
-];
-
-const usd = (n, decimals = 0) => (Number.isFinite(n) ? n : 0).toLocaleString("en-US", {
-  style: "currency", currency: "USD", minimumFractionDigits: decimals, maximumFractionDigits: decimals,
-});
-const usdK = (n) => (Math.abs(n) >= 1000 ? `$${(n / 1000).toFixed(Math.abs(n) >= 100000 ? 0 : 1)}k` : usd(n));
-const pct = (n) => (Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : "—");
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-const periodLabel = (p) => (p ? `${MONTH_NAMES[p.month - 1]} ${p.year}` : "");
-
-// Mirrors public.payroll_line_compute() in supabase/people.sql.
-const adjustmentsTotal = (line) => (line.adjustments || []).reduce((s, a) => s + num(a.usd), 0);
-const lineTotal = (line) => line.source === "import"
-  ? num(line.total)
-  : Math.round(((num(line.base_salary) + num(line.allowance)) / 30 * num(line.days)
-    + num(line.prima) + num(line.platform_fee) + adjustmentsTotal(line)) * 100) / 100;
-
-// Excel DAYS360 (US method), mirrors public.days360().
-function days360(startIso, endIso) {
-  const s = new Date(`${startIso}T00:00:00`), e = new Date(`${endIso}T00:00:00`);
-  const lastDay = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate() === d.getDate();
-  let d1 = s.getDate(), d2 = e.getDate();
-  if (s.getMonth() === 1 && lastDay(s)) { if (e.getMonth() === 1 && lastDay(e)) d2 = 30; d1 = 30; }
-  if (d2 === 31 && d1 >= 30) d2 = 30;
-  if (d1 === 31) d1 = 30;
-  return (e.getFullYear() - s.getFullYear()) * 360 + (e.getMonth() - s.getMonth()) * 30 + (d2 - d1);
-}
-
-/** Semester bonus paid in June and December: base × days / 180 since the previous payday. */
-function suggestedPrima(period, employee) {
-  if (!period || ![6, 12].includes(period.month) || !period.pay_date) return 0;
-  const pay = new Date(`${period.pay_date}T00:00:00`);
-  const from = new Date(pay); from.setMonth(from.getMonth() - 6);
-  const fromIso = from.toISOString().slice(0, 10);
-  const start = employee.start_date && employee.start_date > fromIso ? employee.start_date : fromIso;
-  const days = Math.max(0, Math.min(180, days360(start, period.pay_date)));
-  return Math.round(num(employee.base_salary) * days / 180 * 100) / 100;
-}
-
-/** Days worked in the period month for someone who joined during it (30-day months). */
-function suggestedDays(period, startDate) {
-  if (!period || !startDate) return 30;
-  const [y, m, d] = startDate.split("-").map(Number);
-  if (y !== period.year || m !== period.month) return 30;
-  return Math.max(0, 30 - Math.min(d, 30) + 1);
-}
-
-function downloadCsv(filename, rows) {
-  const csv = rows.map((r) => r.map((c) => {
-    const s = c == null ? "" : String(c);
-    return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
+import {
+  MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, suggestedPrima, suggestedDays, downloadCsv,
+  daysBetween, segmentAmount, buildLiquidationSegments, exitMonthDays, DEEL_HEADER, buildDeelRows,
+} from "./peopleUtils";
+import DirectoryView from "./PeopleDirectory";
 
 /* ============================ data ============================ */
 
@@ -96,13 +24,15 @@ async function fetchAll(table, order) {
 }
 
 function usePeopleData() {
-  const [data, setData] = useState({ periods: [], lines: [], employees: [], loading: true, error: null });
+  const [data, setData] = useState({ periods: [], lines: [], employees: [], grants: [], privates: [], loading: true, error: null });
   const reload = async () => {
     try {
-      const [periods, lines, employees] = await Promise.all([
+      // people_private only returns rows for People editors (RLS); viewers get an empty list.
+      const [periods, lines, employees, grants, privates] = await Promise.all([
         fetchAll("payroll_periods", "id"), fetchAll("payroll_lines", "name"), fetchAll("people_employees", "name"),
+        fetchAll("people_equity_grants", "vesting_start"), fetchAll("people_private", "employee_id"),
       ]);
-      setData({ periods, lines, employees, loading: false, error: null });
+      setData({ periods, lines, employees, grants, privates, loading: false, error: null });
     } catch (err) {
       setData((d) => ({ ...d, loading: false, error: err.message || "No se pudo cargar la información de People." }));
     }
@@ -600,22 +530,93 @@ function AddPersonModal({ period, employees, lines, areas, onAdd, onClose }) {
   );
 }
 
-function RemovePersonModal({ line, period, onConfirm, onClose }) {
-  const [exit, setExit] = useState(false);
-  const [date, setDate] = useState(period.pay_date || "");
+/** Exit + settlement (liquidación). The person stays in this month's payroll, highlighted in red. */
+function ExitModal({ line, period, employee, lines, canEdit, onRegister, onUndo, onRemoveOnly, onClose }) {
+  const existing = line.liquidation;
+  const defaultExit = line.exit_date || (period.pay_date && period.pay_date.slice(0, 7) === period.id ? period.pay_date : `${period.id}-28`);
+  const [exitDate, setExitDate] = useState(defaultExit);
+  const [days, setDays] = useState(line.exit_date ? num(line.days) : exitMonthDays(period, defaultExit, num(line.days)));
+  const [segments, setSegments] = useState(() => existing?.segments?.map((x) => ({ ...x }))
+    || buildLiquidationSegments(employee || { id: line.employee_id }, lines, defaultExit, line.base_salary));
+  const [note, setNote] = useState(existing?.note || "");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const readOnly = !canEdit;
+
+  const changeExit = (value) => {
+    setExitDate(value);
+    if (!value) return;
+    setDays(exitMonthDays(period, value, num(line.days)));
+    setSegments((list) => list.map((x, i) => (i === list.length - 1 ? { ...x, to: value } : x)));
+  };
+  const setSeg = (i, patch) => setSegments((list) => list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const rows = segments.map((x) => ({ ...x, days: Math.max(0, daysBetween(x.from, x.to)), amount: segmentAmount(x) }));
+  const liquidationTotal = Math.round(rows.reduce((t, x) => t + x.amount, 0) * 100) / 100;
+  const monthPay = Math.round((num(line.base_salary) + num(line.allowance)) / 30 * num(days) * 100) / 100;
+  const lineTotalPreview = monthPay + num(line.prima) + num(line.platform_fee) + adjustmentsTotal(line) + liquidationTotal;
+
+  const submit = async () => {
+    setError(null);
+    if (!exitDate) return setError("Indica la fecha de salida.");
+    if (rows.some((x) => !x.from || !x.to || x.to < x.from)) return setError("Revisa las fechas de los tramos.");
+    setBusy(true);
+    try {
+      await onRegister({ exitDate, days: Math.max(0, Math.min(30, num(days))), liquidation: { segments: rows, total: liquidationTotal, note: note.slice(0, 300), calculated_at: new Date().toISOString() } });
+    } catch (err) { setError(err.message || "No se pudo registrar el retiro."); setBusy(false); }
+  };
+
   return (
     <div className="people-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="people-modal is-small" role="dialog" aria-label={`Quitar a ${line.name}`}>
-        <div className="admin-form-header"><h2>Quitar a {line.name}</h2><button className="admin-link-button" onClick={onClose}>Cancelar</button></div>
-        <p className="admin-note">Se quita de la nómina de {periodLabel(period)}. Si además sale de la empresa, márcalo para que no aparezca en las próximas nóminas.</p>
-        <label className="admin-checkbox"><input type="checkbox" checked={exit} onChange={(e) => setExit(e.target.checked)} /> Registrar salida de la empresa</label>
-        {exit && <label className="admin-field"><span>Fecha de salida</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>}
-        <div className="people-modal-actions">
-          <button className="people-danger-button" disabled={busy || (exit && !date)} onClick={async () => { setBusy(true); await onConfirm(exit ? date : null); }}>
-            {busy ? "Quitando…" : "Quitar de la nómina"}
-          </button>
+      <div className="people-modal" role="dialog" aria-label={`Retiro y liquidación de ${line.name}`}>
+        <div className="admin-form-header">
+          <h2>Retiro y liquidación · {line.name}</h2>
+          <button className="admin-link-button" onClick={onClose}>Cerrar</button>
         </div>
+        <p className="admin-note">
+          La persona queda en la nómina de {periodLabel(period)} (en rojo) con el pago de los días trabajados más la liquidación, y no se incluye en las nóminas siguientes.
+          Liquidación = salario ÷ 365 × días de cada tramo de salario, igual que la hoja de liquidaciones del Excel.
+        </p>
+        <div className="admin-form-grid">
+          <label className="admin-field"><span>Fecha de salida</span><input type="date" value={exitDate} disabled={readOnly} onChange={(e) => changeExit(e.target.value)} /></label>
+          <label className="admin-field"><span>Días trabajados en {MONTH_NAMES[period.month - 1].toLowerCase()}</span><input type="number" min="0" max="30" step="0.5" value={days} disabled={readOnly} onChange={(e) => setDays(e.target.value)} /></label>
+          <label className="admin-field"><span>Ingreso</span><input type="date" value={employee?.start_date || ""} disabled /></label>
+        </div>
+        <table className="people-table people-adjustments">
+          <thead><tr><th>Desde</th><th>Hasta</th><th className="num">Salario</th><th className="num">Días</th><th className="num">Valor</th><th /></tr></thead>
+          <tbody>
+            {rows.map((x, i) => (
+              <tr key={i}>
+                <td><input className="people-cell-input" type="date" value={x.from} disabled={readOnly} onChange={(e) => setSeg(i, { from: e.target.value })} /></td>
+                <td><input className="people-cell-input" type="date" value={x.to} disabled={readOnly} onChange={(e) => setSeg(i, { to: e.target.value })} /></td>
+                <td className="num"><input className="people-cell-input" type="number" step="0.01" value={x.salary} disabled={readOnly} style={{ width: 96 }} onChange={(e) => setSeg(i, { salary: e.target.value })} /></td>
+                <td className="num">{x.days}</td>
+                <td className="num">{usd(x.amount, 2)}</td>
+                <td>{!readOnly && rows.length > 1 && <button className="admin-link-button is-danger" onClick={() => setSegments((list) => list.filter((_, j) => j !== i))}>Quitar</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td colSpan={4}>Liquidación (plan de retiro)</td><td className="num">{usd(liquidationTotal, 2)}</td><td /></tr></tfoot>
+        </table>
+        {!readOnly && (
+          <button className="people-secondary-button people-align-start" onClick={() => setSegments((list) => [...list, { from: exitDate, to: exitDate, salary: list[list.length - 1]?.salary || 0 }])}>+ Agregar tramo</button>
+        )}
+        <label className="admin-field"><span>Nota</span><input value={note} maxLength={300} disabled={readOnly} onChange={(e) => setNote(e.target.value)} placeholder="Motivo, acuerdos, pagos adicionales…" /></label>
+        <div className="people-exit-summary">
+          <div><span>Pago del mes ({num(days)} días)</span><b>{usd(monthPay, 2)}</b></div>
+          <div><span>Liquidación</span><b>{usd(liquidationTotal, 2)}</b></div>
+          <div className="is-total"><span>Total de la línea (con prima, comisión y novedades)</span><b>{usd(lineTotalPreview, 2)}</b></div>
+        </div>
+        {error && <div className="board-doc-error" role="alert">{error}</div>}
+        {!readOnly && (
+          <div className="people-modal-actions is-split">
+            <div>
+              {line.exit_date
+                ? <button className="admin-link-button" disabled={busy} onClick={async () => { setBusy(true); await onUndo(); }}>Deshacer retiro</button>
+                : <button className="admin-link-button is-danger" disabled={busy} onClick={async () => { if (window.confirm(`¿Quitar a ${line.name} de esta nómina sin registrar retiro (por ejemplo, si se agregó por error)?`)) { setBusy(true); await onRemoveOnly(); } }}>Quitar sin liquidar (error de carga)</button>}
+            </div>
+            <button className="people-danger-button is-solid" disabled={busy} onClick={submit}>{busy ? "Guardando…" : line.exit_date ? "Actualizar liquidación" : "Registrar retiro y liquidación"}</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -668,6 +669,7 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
       if (e2) throw e2;
       patchLocal((d) => ({ employees: d.employees.map((e) => (e.id === line.employee_id ? { ...e, ...empPatch } : e)) }));
     }
+    return true;
   });
 
   const updatePeriod = (patch) => track(async () => {
@@ -697,19 +699,39 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
     setAdding(false);
   };
 
-  const removePerson = (line, exitDate) => track(async () => {
+  const setEmployeeStatus = async (employeeId, patch) => {
+    if (!employeeId) return;
+    const { error: err } = await supabase.from("people_employees").update(patch).eq("id", employeeId);
+    if (err) throw err;
+    patchLocal((d) => ({ employees: d.employees.map((e) => (e.id === employeeId ? { ...e, ...patch } : e)) }));
+  };
+
+  // Retiro: the line stays in this payroll (red) with the days worked plus the settlement.
+  const registerExit = async (line, { exitDate, days, liquidation }) => {
+    if (!(await updateLine(line, { exit_date: exitDate, days, liquidation }))) return;
+    await track(() => setEmployeeStatus(line.employee_id, { active: false, end_date: exitDate }));
+    setRemoving(null);
+  };
+
+  const undoExit = async (line) => {
+    if (!(await updateLine(line, { exit_date: null, liquidation: null, days: 30 }))) return;
+    await track(() => setEmployeeStatus(line.employee_id, { active: true, end_date: null }));
+    setRemoving(null);
+  };
+
+  const removeOnly = (line) => track(async () => {
     const { error: err } = await supabase.from("payroll_lines").delete().eq("id", line.id);
     if (err) throw err;
-    if (exitDate && line.employee_id) {
-      const { error: e2 } = await supabase.from("people_employees").update({ active: false, end_date: exitDate }).eq("id", line.employee_id);
-      if (e2) throw e2;
-    }
-    patchLocal((d) => ({
-      lines: d.lines.filter((l) => l.id !== line.id),
-      employees: exitDate ? d.employees.map((e) => (e.id === line.employee_id ? { ...e, active: false, end_date: exitDate } : e)) : d.employees,
-    }));
+    patchLocal((d) => ({ lines: d.lines.filter((l) => l.id !== line.id) }));
     setRemoving(null);
   });
+
+  const exportDeel = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const { rows, missing } = buildDeelRows(period, allPeriodLines, employees, today);
+    if (missing.length && !window.confirm(`Estas personas tienen novedades o liquidación pero no tienen contrato de Deel, así que no van en el archivo:\n\n${missing.join("\n")}\n\n¿Generar el archivo igual?`)) return;
+    downloadCsv(`bulk_advanced_${today}.csv`, [DEEL_HEADER, ...rows]);
+  };
 
   const closePayroll = async () => {
     if (!window.confirm(`¿Cerrar la nómina de ${periodLabel(period)} por ${usd(total, 2)}?\n\nQuedará bloqueada y se creará el borrador del mes siguiente con las personas activas.`)) return;
@@ -744,6 +766,7 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
         <div className="people-calc-actions">
           {saving && <span className="people-muted">Guardando…</span>}
           {canEdit && <button className="people-secondary-button" onClick={() => setAdding(true)}>+ Agregar persona</button>}
+          {allPeriodLines.some((l) => l.source === "app") && <button className="people-secondary-button" onClick={exportDeel} title="Archivo de ajustes masivos (bulk_advanced) para cargar en Deel">Archivo Deel</button>}
           {canEdit && <button className="admin-primary-button" disabled={busy || !allPeriodLines.length} onClick={closePayroll}>Cerrar nómina</button>}
           {period.status === "closed" && isSuperAdmin(member) && <button className="people-secondary-button" onClick={reopen}>Reabrir</button>}
         </div>
@@ -753,6 +776,10 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
         <Kpi label="Total a pagar" value={usd(total, 2)} sub={prevPeriod ? `${total >= prevTotal ? "▲" : "▼"} ${usd(Math.abs(total - prevTotal), 2)} vs ${periodLabel(prevPeriod)}` : null} />
         <Kpi label="Personas" value={allPeriodLines.length} />
         <Kpi label="Novedades" value={usd(adjTotal, 2)} sub={`${allPeriodLines.filter((l) => l.adjustments?.length).length} personas con novedades`} />
+        {allPeriodLines.some((l) => l.exit_date) && (
+          <Kpi label="Retiros" value={allPeriodLines.filter((l) => l.exit_date).length}
+            sub={`Liquidaciones ${usd(allPeriodLines.reduce((t, l) => t + num(l.liquidation?.total), 0), 2)}`} tone="up" />
+        )}
         {[6, 12].includes(period.month) && <Kpi label="Prima" value={usd(primaTotal, 2)} sub="Salario × días del semestre / 180" />}
       </div>
 
@@ -777,8 +804,15 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
               const imported = l.source === "import";
               const off = !canEdit || imported;
               return (
-                <tr key={l.id}>
-                  <td className="people-sticky"><div className="people-person">{l.name}</div><div className="people-muted">{l.role_title}</div></td>
+                <tr key={l.id} className={l.exit_date ? "is-exit" : undefined}>
+                  <td className="people-sticky">
+                    <div className="people-person">{l.name}</div>
+                    {l.exit_date ? (
+                      <button className="people-exit-badge" onClick={() => setRemoving(l)}>
+                        Retiro {new Date(`${l.exit_date}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })} · Liquidación {usd(num(l.liquidation?.total), 2)}
+                      </button>
+                    ) : <div className="people-muted">{l.role_title}</div>}
+                  </td>
                   <td>
                     {off ? (l.area || "—") : (
                       <select className="people-cell-select" value={l.area || ""} onChange={(e) => updateLine(l, { area: e.target.value })}>
@@ -806,7 +840,7 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
                     </td>
                   </>}
                   <td className="num"><b>{usd(lineTotal(l), 2)}</b></td>
-                  <td>{canEdit && <button className="board-task-remove-file" title="Quitar de la nómina" aria-label={`Quitar a ${l.name}`} onClick={() => setRemoving(l)}>×</button>}</td>
+                  <td>{canEdit && !l.exit_date && !imported && <button className="board-task-remove-file" title="Retiro y liquidación" aria-label={`Retirar a ${l.name}`} onClick={() => setRemoving(l)}>×</button>}</td>
                 </tr>
               );
             })}
@@ -827,7 +861,10 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
           onSave={async (items) => { await updateLine(adjFor, { adjustments: items }); setAdjFor(null); }} />
       )}
       {adding && <AddPersonModal period={period} employees={employees} lines={lines} areas={areas} onAdd={addPerson} onClose={() => setAdding(false)} />}
-      {removing && <RemovePersonModal line={removing} period={period} onClose={() => setRemoving(null)} onConfirm={(date) => removePerson(removing, date)} />}
+      {removing && (
+        <ExitModal line={removing} period={period} employee={employees.find((e) => e.id === removing.employee_id)} lines={lines} canEdit={canEdit}
+          onClose={() => setRemoving(null)} onRegister={(data) => registerExit(removing, data)} onUndo={() => undoExit(removing)} onRemoveOnly={() => removeOnly(removing)} />
+      )}
     </div>
   );
 }
@@ -835,13 +872,14 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
 /* ============================ workspace ============================ */
 
 const SECTIONS = [
+  { id: "directory", label: "Directorio", icon: "◉", title: "Directorio de personas", text: "Ficha de cada persona: datos laborales, contacto, stock options e historial." },
   { id: "reports", label: "Reportes", icon: "▧", title: "Reportes de nómina", text: "KPIs, evolución mensual y distribución por área." },
   { id: "monthly", label: "Payroll mensual", icon: "☰", title: "Payroll mes a mes", text: "Pago por persona y mes, con filtros de año, área y tipo." },
   { id: "calc", label: "Cálculo de nómina", icon: "⊞", title: "Cálculo de nómina", text: "Prepara la próxima nómina: personas, días, prima y novedades." },
 ];
 
 export default function PeopleWorkspace({ editable }) {
-  const [section, setSection] = useState("reports");
+  const [section, setSection] = useState("directory");
   const data = usePeopleData();
   const current = SECTIONS.find((s) => s.id === section);
 
@@ -867,6 +905,7 @@ export default function PeopleWorkspace({ editable }) {
         {data.error && <div className="board-doc-error" role="alert">{data.error}</div>}
         {data.loading ? <div className="board-empty-state">Cargando…</div> : (
           <>
+            {section === "directory" && <DirectoryView employees={data.employees} privates={data.privates} grants={data.grants} lines={data.lines} periods={data.periods} editable={editable} patchLocal={data.patchLocal} />}
             {section === "reports" && <ReportsView periods={data.periods} lines={data.lines} employees={data.employees} />}
             {section === "monthly" && <MonthlyPayrollView periods={data.periods} lines={data.lines} />}
             {section === "calc" && <PayrollCalcView periods={data.periods} lines={data.lines} employees={data.employees} editable={editable} patchLocal={data.patchLocal} reload={data.reload} />}

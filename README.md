@@ -5,7 +5,7 @@ el producto en los modulos Cashflow, Board y People. Cashflow contiene Dashboard
 Reports, Investment, Master Clients, Invoice Schedule, Weekly/Monthly Cash Flow,
 Outflow Schedule, Deferred Income, AR Aging y Assumptions. Board
 contiene Legal Docs Series A (lector PDF privado), Series A Tasks (con adjuntos
-privados) y Local entities; People tiene reportes de nómina, payroll mes a mes y cálculo de la próxima nómina; Administración
+privados) y Local entities; People tiene directorio de personas, reportes de nómina, payroll mes a mes y cálculo de la próxima nómina (con liquidaciones y archivo para Deel); Administración
 (solo Super Admin) gestiona miembros, roles y acceso por módulo. Los calculos se
 actualizan en tiempo real.
 
@@ -21,7 +21,9 @@ src/storage.js        → ÚNICO archivo a modificar para cambiar dónde se guar
 src/supabaseClient.js → cliente de Supabase + funciones para leer/agregar/quitar el allowlist del equipo
 src/Auth.jsx          → pantalla de login (magic link o contraseña) y verificación de acceso
 src/main.jsx          → punto de entrada de React
-src/People.jsx        → módulo People (reportes, payroll mensual, cálculo de nómina)
+src/People.jsx        → módulo People (reportes, payroll mensual, cálculo de nómina, retiros, archivo Deel)
+src/PeopleDirectory.jsx → directorio de personas (fichas, datos sensibles, stock options)
+src/peopleUtils.js    → cálculos compartidos de People (totales, prima, liquidación, Deel)
 src/cashflow.css      → estilos con la identidad visual de Celes
 supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
 supabase/people.sql   → tablas, reglas y cierre de nómina del módulo People (los datos salariales no van al repo)
