@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { supabase, isEmailAllowed } from "./supabaseClient";
+import { supabase, getMyMember } from "./supabaseClient";
+import { MemberContext } from "./access";
 
 const T = {
   bg: "#F4F5F2",
@@ -218,6 +219,7 @@ function LoginForm({ banner }) {
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined); // undefined = loading, null = signed out
   const [notAllowed, setNotAllowed] = useState(null);
+  const [member, setMember] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => checkSession(data.session));
@@ -231,18 +233,20 @@ export default function AuthGate({ children }) {
 
   async function checkSession(s) {
     if (!s) {
+      setMember(null);
       setSession(null);
       return;
     }
-    // Fail closed: if the allowlist cannot be checked, treat it as not allowed.
-    const allowed = await isEmailAllowed(s.user.email).catch(() => false);
-    if (!allowed) {
+    // Fail closed: if the member record cannot be loaded, treat it as not allowed.
+    const record = await getMyMember(s.user.email).catch(() => null);
+    if (!record) {
       setNotAllowed(s.user.email);
       await supabase.auth.signOut();
       setSession(null);
       return;
     }
     setNotAllowed(null);
+    setMember(record);
     setSession(s);
   }
 
@@ -258,5 +262,5 @@ export default function AuthGate({ children }) {
     );
   }
 
-  return children;
+  return <MemberContext.Provider value={member}>{children}</MemberContext.Provider>;
 }

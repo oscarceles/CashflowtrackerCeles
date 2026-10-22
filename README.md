@@ -3,9 +3,10 @@
 App web construida a partir de `Celes_CashFlow_Tracker_v3.xlsx`. La portada organiza
 el producto en los modulos Cashflow, Board y People. Cashflow contiene Dashboard,
 Reports, Investment, Master Clients, Invoice Schedule, Weekly/Monthly Cash Flow,
-Outflow Schedule, Deferred Income, AR Aging, Assumptions y Team Access. Board
+Outflow Schedule, Deferred Income, AR Aging y Assumptions. Board
 contiene Legal Docs Series A (lector PDF privado), Series A Tasks (con adjuntos
-privados) y Local entities; People muestra "En construcción". Los calculos se
+privados) y Local entities; People muestra "En construcción"; Administración
+(solo Super Admin) gestiona miembros, roles y acceso por módulo. Los calculos se
 actualizan en tiempo real.
 
 Consulta [WIKI.md](WIKI.md) para el funcionamiento actual detallado. Mantenerlo
@@ -22,15 +23,17 @@ src/Auth.jsx          → pantalla de login (magic link o contraseña) y verific
 src/main.jsx          → punto de entrada de React
 src/cashflow.css      → estilos con la identidad visual de Celes
 supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
-supabase/security-hardening.sql → RLS restringida a allowed_users + hook que bloquea registros fuera de la lista (correr después de schema.sql)
+supabase/security-hardening.sql → roles de miembros, RLS por rol/módulo + hook que bloquea registros fuera de la lista (correr después de schema.sql)
 netlify.toml          → build, funciones y headers de seguridad (CSP, HSTS, anti-iframe)
 netlify/functions/    → funciones server-side de Board (documentos Series A y tareas/adjuntos)
 scripts/deploy-production.mjs → deploy a producción con las credenciales server-side de Board
 ```
 
-La pestaña **Team Access** dentro de la app permite agregar o quitar personas
-del equipo sin tocar código: la lista vive en la tabla `allowed_users` de
-Supabase, y cualquier persona que ya tenga acceso puede administrarla.
+El módulo **Administración → Miembros** permite a un Super Admin agregar,
+editar o quitar miembros y asignarles rol (Super Admin, Admin, Colaborador,
+Board Member) y acceso por módulo (ver/editar), sin tocar código. La lista vive
+en la tabla `allowed_users` de Supabase; las reglas se aplican en la base de
+datos (RLS), en las funciones de Board y en la interfaz. Ver [WIKI.md](WIKI.md).
 
 ## Correr en local
 
@@ -82,7 +85,7 @@ URL / Redirect URLs) para que el enlace del correo redirija correctamente.
 Solo los correos en la tabla `allowed_users` pueden entrar, sin importar el
 método de login. Si alguien fuera de la lista inicia sesión, se cierra su
 sesión automáticamente y ve un mensaje de acceso denegado. Para agregar o
-quitar gente del equipo, usa la pestaña **Team Access** dentro de la app
+quitar gente del equipo, usa **Administración → Miembros** dentro de la app
 (no requiere redeploy).
 
 ## Deploy (GitHub → Netlify o Vercel)

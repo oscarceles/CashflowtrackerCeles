@@ -21,6 +21,19 @@ const documents = [
   { id: "side-letter-agviii", name: "Side_Letter_AGVIII executed.pdf" },
 ];
 
+// Mirrors public.module_access() in supabase/security-hardening.sql and src/access.js.
+const moduleAccess = (member, module) => {
+  if (!member) return null;
+  const chosen = member.modules && member.modules[module];
+  switch (member.role) {
+    case "super_admin": return "edit";
+    case "board_member": return module === "board" ? "view" : null;
+    case "admin": return chosen === "view" || chosen === "edit" ? chosen : null;
+    case "colaborador": return chosen === "view" || chosen === "edit" ? "view" : null;
+    default: return null;
+  }
+};
+
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -51,14 +64,13 @@ exports.handler = async (event) => {
     const email = user.email?.toLowerCase();
     if (!email || !user.email_confirmed_at) return jsonResponse(403, { error: "Account is not authorized" });
 
-    const allowlistUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
-    allowlistUrl.search = new URLSearchParams({ select: "email", email: `eq.${email}`, limit: "1" }).toString();
-    const allowlistResponse = await fetch(allowlistUrl, {
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-    });
-    if (!allowlistResponse.ok) return jsonResponse(503, { error: "Could not verify document access" });
-    const allowedUsers = await allowlistResponse.json();
-    if (!allowedUsers.length) return jsonResponse(403, { error: "Account is not authorized" });
+    const memberUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
+    memberUrl.search = new URLSearchParams({ select: "email,role,modules", email: `eq.${email}`, limit: "1" }).toString();
+    const memberResponse = await fetch(memberUrl, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+    if (!memberResponse.ok) return jsonResponse(503, { error: "Could not verify access" });
+    const [member] = await memberResponse.json();
+    const boardAccess = moduleAccess(member, "board");
+    if (!boardAccess) return jsonResponse(403, { error: "Account is not authorized" });
 
     const params = new URLSearchParams(event.queryStringParameters || {});
     if (params.get("action") === "list") {

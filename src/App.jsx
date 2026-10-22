@@ -6,7 +6,12 @@ import {
 } from "recharts";
 import { SEED } from "./seed";
 import { loadState, saveState, clearState } from "./storage";
-import { supabase, listAllowedUsers, addAllowedUser, removeAllowedUser } from "./supabaseClient";
+import { supabase } from "./supabaseClient";
+import { useMember, canView, canEdit, isSuperAdmin } from "./access";
+import AdminWorkspace from "./Admin";
+
+// True when the signed-in member can only view the current module.
+const ReadOnlyContext = React.createContext(false);
 
 // PDF.js is loaded on demand so the main bundle stays small.
 let pdfjsPromise;
@@ -286,7 +291,9 @@ const Field = ({ label, children }) => (
     <div style={{ marginBottom: 4 }}>{label}</div>{children}
   </label>
 );
-const Btn = ({ children, onClick, kind = "primary", small, disabled, title }) => {
+const Btn = ({ children, onClick, kind = "primary", small, disabled, title, edit }) => {
+  const readOnly = React.useContext(ReadOnlyContext);
+  if (edit && readOnly) return null;
   const styles = {
     primary: { background: T.blue, color: "#fff", border: "none" },
     ghost: { background: "#fff", color: T.ink, border: `1px solid ${T.line}` },
@@ -470,7 +477,7 @@ function InvestmentsView({ state, setState, today }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: T.sub }}>Investments are cash inflows on their investment date and affect projected and real cash balances.</div>
-        <Btn onClick={() => setEditing({ thirdParty: "", amount: 0, date: today })}>+ Add investment</Btn>
+        <Btn edit onClick={() => setEditing({ thirdParty: "", amount: 0, date: today })}>+ Add investment</Btn>
       </div>
       <Card style={{ padding: 0, overflow: "auto", maxHeight: "70vh" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -484,8 +491,8 @@ function InvestmentsView({ state, setState, today }) {
                 <td style={{ ...td, fontWeight: 600 }}>{investment.thirdParty}</td>
                 <td style={{ ...tdN, color: T.green }}>{fmt$(investment.amount, 2)}</td>
                 <td style={{ ...td, display: "flex", gap: 6 }}>
-                  <Btn small kind="ghost" onClick={() => setEditing({ ...investment })}>Edit</Btn>
-                  <Btn small kind="danger" onClick={() => remove(investment.id)}>Delete</Btn>
+                  <Btn edit small kind="ghost" onClick={() => setEditing({ ...investment })}>Edit</Btn>
+                  <Btn edit small kind="danger" onClick={() => remove(investment.id)}>Delete</Btn>
                 </td>
               </tr>
             ))}
@@ -644,7 +651,7 @@ function ClientsView({ state, setState, M }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: T.sub }}>Adding a client generates its full 2026–27 invoice schedule automatically. Editing terms can regenerate future unpaid invoices.</div>
-        <Btn onClick={() => { setIsNew(true); setEditing({ ...emptyClient }); }}>+ Add client</Btn>
+        <Btn edit onClick={() => { setIsNew(true); setEditing({ ...emptyClient }); }}>+ Add client</Btn>
       </div>
       <Card style={{ padding: 0, overflow: "auto", maxHeight: "70vh" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -667,7 +674,7 @@ function ClientsView({ state, setState, M }) {
                 <td style={tdN}>{c.delay}d</td>
                 <td style={tdN}>{fmt$(billedBy[c.name] || 0)}</td>
                 <td style={td}>{c.active ? <span style={{ color: T.green, fontWeight: 700 }}>Yes</span> : "No"}</td>
-                <td style={td}><Btn small kind="ghost" onClick={() => { setIsNew(false); setEditing({ ...c }); }}>Edit</Btn></td>
+                <td style={td}><Btn edit small kind="ghost" onClick={() => { setIsNew(false); setEditing({ ...c }); }}>Edit</Btn></td>
               </tr>
             ))}
           </tbody>
@@ -716,7 +723,7 @@ function InvoicesView({ state, setState, M }) {
         </select>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 13, color: T.sub }}>{list.length} invoices · <b style={{ fontFamily: T.mono, color: T.ink }}>{fmt$(sum)}</b></span>
-          <Btn onClick={() => setEditing({ inv: "", client: clientNames[0], ps: M.today, pe: addMonths(M.today, 1), idate: M.today, amt: 0, edate: addDays(M.today, 30), paid: false, adate: null })}>+ Manual invoice</Btn>
+          <Btn edit onClick={() => setEditing({ inv: "", client: clientNames[0], ps: M.today, pe: addMonths(M.today, 1), idate: M.today, amt: 0, edate: addDays(M.today, 30), paid: false, adate: null })}>+ Manual invoice</Btn>
         </div>
       </div>
       <Card style={{ padding: 0, overflow: "auto", maxHeight: "70vh" }}>
@@ -740,10 +747,10 @@ function InvoicesView({ state, setState, M }) {
                 <td style={td}>{v.adate ? fmtD(v.adate) : "—"}</td>
                 <td style={{ ...td, display: "flex", gap: 6 }}>
                   {!v.paid
-                    ? <Btn small kind="green" onClick={() => markPaid(v.id)} title="Mark paid today">✓ Paid</Btn>
-                    : <Btn small kind="ghost" onClick={() => undoPaid(v.id)}>Undo</Btn>}
-                  <Btn small kind="ghost" onClick={() => setEditing({ ...v })}>Edit</Btn>
-                  {!v.paid && <Btn small kind="danger" onClick={() => del(v.id)}>✕</Btn>}
+                    ? <Btn edit small kind="green" onClick={() => markPaid(v.id)} title="Mark paid today">✓ Paid</Btn>
+                    : <Btn edit small kind="ghost" onClick={() => undoPaid(v.id)}>Undo</Btn>}
+                  <Btn edit small kind="ghost" onClick={() => setEditing({ ...v })}>Edit</Btn>
+                  {!v.paid && <Btn edit small kind="danger" onClick={() => del(v.id)}>✕</Btn>}
                 </td>
               </tr>
             ))}
@@ -990,6 +997,7 @@ function MonthlyView({ M }) {
 }
 
 function OutflowsView({ state, setState, M }) {
+  const readOnly = React.useContext(ReadOnlyContext);
   const areas = Object.keys(state.outflows);
   const esc = state.assumptions.escalation;
   const setCell = (area, mi, val) =>
@@ -1014,7 +1022,7 @@ function OutflowsView({ state, setState, M }) {
                 <td style={{ ...td, fontWeight: 600 }}>{a}</td>
                 {state.outflows[a].map((v, mi) => (
                   <td key={mi} style={{ ...tdN, padding: 3 }}>
-                    <input type="number" value={v} onChange={(e) => setCell(a, mi, +e.target.value || 0)}
+                    <input type="number" value={v} disabled={readOnly} onChange={(e) => setCell(a, mi, +e.target.value || 0)}
                       style={{ ...inputStyle, width: 78, textAlign: "right", fontFamily: T.mono, fontSize: 12, padding: "4px 6px", background: "#FFFDF2" }} />
                   </td>
                 ))}
@@ -1108,13 +1116,14 @@ function ArAgingView({ M }) {
 }
 
 function AssumptionsView({ state, setState, resetAll, saved }) {
+  const readOnly = React.useContext(ReadOnlyContext);
   const a = state.assumptions;
   const set = (k, v) => setState((s) => ({ ...s, assumptions: { ...s.assumptions, [k]: v } }));
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16, alignItems: "start" }}>
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 12 }}>Model levers</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <fieldset disabled={readOnly} style={{ display: "flex", flexDirection: "column", gap: 12, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: T.ink }}>
             <input type="checkbox" checked={a.autoToday !== false} onChange={(e) => {
               const autoToday = e.target.checked;
@@ -1145,7 +1154,7 @@ function AssumptionsView({ state, setState, resetAll, saved }) {
           <Field label="Default payment delay for new clients (days)">
             <input type="number" style={inputStyle} value={a.defaultDelay} onChange={(e) => set("defaultDelay", +e.target.value || 30)} />
           </Field>
-        </div>
+        </fieldset>
       </Card>
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 12 }}>Data</div>
@@ -1156,13 +1165,13 @@ function AssumptionsView({ state, setState, resetAll, saved }) {
           <br />All figures were seeded from <b>Celes_CashFlow_Tracker_v3.xlsx</b>.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Btn kind="ghost" onClick={() => {
+          <Btn edit kind="ghost" onClick={() => {
             const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const el = document.createElement("a"); el.href = url; el.download = "celes-cashflow-backup.json"; el.click();
             URL.revokeObjectURL(url);
           }}>Download backup (JSON)</Btn>
-          <Btn kind="danger" onClick={() => { if (window.confirm("Reset everything back to the original Excel data? Your edits will be lost.")) resetAll(); }}>Reset to Excel data</Btn>
+          <Btn edit kind="danger" onClick={() => { if (window.confirm("Reset everything back to the original Excel data? Your edits will be lost.")) resetAll(); }}>Reset to Excel data</Btn>
         </div>
       </Card>
       <Card>
@@ -1180,98 +1189,6 @@ function AssumptionsView({ state, setState, resetAll, saved }) {
 }
 
 /* ============================= USERS (TEAM ACCESS) ============================= */
-function UsersView() {
-  const [users, setUsers] = useState(null);
-  const [me, setMe] = useState(null);
-  const [email, setEmail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const load = async () => {
-    setError(null);
-    try {
-      const [list, { data: { user } }] = await Promise.all([listAllowedUsers(), supabase.auth.getUser()]);
-      setUsers(list);
-      setMe(user?.email?.toLowerCase() || null);
-    } catch (e) {
-      setError(e.message || "No se pudo cargar la lista.");
-    }
-  };
-  useEffect(() => { load(); }, []);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      await addAllowedUser(email.trim());
-      setEmail("");
-      await load();
-    } catch (e) {
-      setError(e.message || "No se pudo agregar el correo.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRemove = async (target) => {
-    if (!window.confirm(`Quitar el acceso de ${target}?`)) return;
-    setBusy(true); setError(null);
-    try {
-      await removeAllowedUser(target);
-      await load();
-    } catch (e) {
-      setError(e.message || "No se pudo quitar el acceso.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 16, alignItems: "start" }}>
-      <Card>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>Agregar persona</div>
-        <form onSubmit={handleAdd} style={{ display: "flex", gap: 8 }}>
-          <input type="email" required placeholder="correo@celes.ai" value={email}
-            onChange={(e) => setEmail(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-          <Btn kind="primary" disabled={busy}>Agregar</Btn>
-        </form>
-        <div style={{ fontSize: 12, color: T.sub, marginTop: 10, lineHeight: 1.5 }}>
-          Solo quien ya tiene acceso puede agregar o quitar personas. El nuevo
-          correo podrá entrar con magic link o contraseña la próxima vez que
-          inicie sesión.
-        </div>
-        {error && (
-          <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: T.redBg, color: T.red, fontSize: 13 }}>
-            {error}
-          </div>
-        )}
-      </Card>
-
-      <Card>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>Con acceso ({users?.length ?? "…"})</div>
-        {!users ? (
-          <div style={{ fontSize: 13, color: T.sub }}>Cargando…</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {users.map((u) => (
-              <div key={u.email} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: T.grayBg }}>
-                <div style={{ fontSize: 13.5 }}>
-                  {u.email}
-                  {u.email === me && <span style={{ marginLeft: 8, fontSize: 11, color: T.sub }}>(tú)</span>}
-                </div>
-                <Btn kind="danger" small disabled={busy || u.email === me}
-                  title={u.email === me ? "Pide a un compañero que quite tu acceso" : "Quitar acceso"}
-                  onClick={() => handleRemove(u.email)}>Quitar</Btn>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
 function PdfReader({ url, title }) {
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
@@ -1405,7 +1322,7 @@ function SeriesATaskForm({ initial, onSave, onClose }) {
   );
 }
 
-function SeriesATasksView() {
+function SeriesATasksView({ editable }) {
   const [tasks, setTasks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState("Open");
@@ -1578,7 +1495,7 @@ function SeriesATasksView() {
           <h1>Series A Tasks</h1>
           <p>Post-closing follow-ups from Celes_Series_A_Closing_Record.</p>
         </div>
-        <button className="board-task-add" onClick={() => setEditing({ title: "", owner: "", dueDate: "", dueLabel: "", source: "", details: "", status: "Open", recurring: false, attachments: [] })}>+ Add task</button>
+        {editable && <button className="board-task-add" onClick={() => setEditing({ title: "", owner: "", dueDate: "", dueLabel: "", source: "", details: "", status: "Open", recurring: false, attachments: [] })}>+ Add task</button>}
       </div>
 
       <div className="board-task-note">Working checklist based on the closing record; confirm legal and tax interpretations with counsel.</div>
@@ -1619,23 +1536,25 @@ function SeriesATasksView() {
                   <div className="board-eyebrow">{selectedTask.recurring ? "RECURRING OBLIGATION" : selectedTask.dueDate ? "POST-CLOSING FOLLOW-UP" : "SERIES A TASK"}</div>
                   <h2>{selectedTask.title}</h2>
                 </div>
-                <div className="board-task-detail-actions">
-                  <button onClick={() => setEditing({ ...selectedTask })}>Edit</button>
-                  <button className="is-danger" onClick={deleteTask} disabled={busy}>Delete</button>
-                </div>
+                {editable && (
+                  <div className="board-task-detail-actions">
+                    <button onClick={() => setEditing({ ...selectedTask })}>Edit</button>
+                    <button className="is-danger" onClick={deleteTask} disabled={busy}>Delete</button>
+                  </div>
+                )}
               </div>
               <div className="board-task-facts">
                 <div><span>OWNER</span><b>{selectedTask.owner || "Unassigned"}</b></div>
                 <div><span>DUE</span><b>{formatDue(selectedTask)}</b></div>
                 <div><span>SOURCE</span><b>{selectedTask.source || "—"}</b></div>
-                <div><span>STATUS</span><select value={selectedTask.status} disabled={busy} onChange={(event) => updateStatus(event.target.value)}><option>Open</option><option>In progress</option><option>Done</option></select></div>
+                <div><span>STATUS</span><select value={selectedTask.status} disabled={busy || !editable} onChange={(event) => updateStatus(event.target.value)}><option>Open</option><option>In progress</option><option>Done</option></select></div>
               </div>
               <div className="board-task-details-text">{selectedTask.details}</div>
 
               <div className="board-task-attachments-header">
                 <div><h3>Attachments</h3><span>{selectedTask.attachments?.length || 0} files</span></div>
-                <input ref={uploadRef} type="file" className="sr-only" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp" onChange={addAttachment} />
-                <button className="board-task-add-file" disabled={busy} onClick={() => uploadRef.current?.click()}>+ Attach files</button>
+                {editable && <input ref={uploadRef} type="file" className="sr-only" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp" onChange={addAttachment} />}
+                {editable && <button className="board-task-add-file" disabled={busy} onClick={() => uploadRef.current?.click()}>+ Attach files</button>}
               </div>
               <div className="board-task-attachments">
                 {selectedTask.attachments?.length ? selectedTask.attachments.map((attachment) => (
@@ -1643,7 +1562,7 @@ function SeriesATasksView() {
                     <span className="board-pdf-icon">{attachment.contentType?.includes("pdf") ? "PDF" : "FILE"}</span>
                     <button className="board-task-attachment-name" onClick={() => openAttachment(attachment)}>{attachment.name}</button>
                     <span className="board-task-file-size">{(attachment.size / (1024 * 1024)).toFixed(2)} MB</span>
-                    <button className="board-task-remove-file" title="Remove attachment" aria-label={`Remove ${attachment.name}`} disabled={busy} onClick={() => removeAttachment(attachment)}>×</button>
+                    {editable && <button className="board-task-remove-file" title="Remove attachment" aria-label={`Remove ${attachment.name}`} disabled={busy} onClick={() => removeAttachment(attachment)}>×</button>}
                   </div>
                 )) : <div className="board-task-no-files">No files attached to this task.</div>}
               </div>
@@ -1674,7 +1593,7 @@ function SeriesATasksView() {
   );
 }
 
-function BoardWorkspace() {
+function BoardWorkspace({ editable }) {
   const [section, setSection] = useState("legal-series-a");
   const [entitiesOpen, setEntitiesOpen] = useState(true);
   const [documents, setDocuments] = useState([]);
@@ -1826,7 +1745,7 @@ function BoardWorkspace() {
             </div>
           </div>
         ) : section === "series-a-tasks" ? (
-          <SeriesATasksView />
+          <SeriesATasksView editable={editable} />
         ) : (
           <section className="board-section-placeholder">
             <div className="board-eyebrow">BOARD · {selectedEntity ? "LOCAL ENTITIES" : "SERIES A"}</div>
@@ -1866,11 +1785,12 @@ const NAV = [
   { id: "deferred", label: "Deferred Income", icon: "◔" },
   { id: "aging", label: "AR Aging", icon: "◷" },
   { id: "assumptions", label: "Assumptions", icon: "⚙" },
-  { id: "users", label: "Team Access", icon: "◈" },
 ];
 
 /* ============================= APP ============================= */
 export default function App() {
+  const member = useMember();
+  const cashflowEditable = canEdit(member, "cashflow");
   const [state, setState] = useState(buildInitialState);
   const [module, setModule] = useState("home");
   const [view, setView] = useState("dashboard");
@@ -1900,12 +1820,13 @@ export default function App() {
     return false;
   };
   useEffect(() => {
+    if (!canView(member, "cashflow")) return;
     (async () => { await loadShared(); setLoaded(true); })();
   }, []);
 
-  /* autosave (debounced) */
+  /* autosave (debounced) — only for members who can edit Cashflow */
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !cashflowEditable) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
@@ -1914,7 +1835,7 @@ export default function App() {
       } catch (e) { setSaved(false); }
     }, 800);
     return () => clearTimeout(saveTimer.current);
-  }, [state, loaded]);
+  }, [state, loaded, cashflowEditable]);
 
   useEffect(() => {
     if (!loaded || state.assumptions.autoToday === false) return;
@@ -1931,9 +1852,13 @@ export default function App() {
   }, [loaded, state.assumptions.autoToday, state.assumptions.today]);
 
   const resetAll = async () => {
+    if (!cashflowEditable) return;
     try { await clearState(); } catch (e) {}
     setState(buildInitialState());
   };
+
+  // Views receive this instead of setState, so view-only members cannot change data.
+  const editState = cashflowEditable ? setState : () => {};
 
   const M = useModel(state);
 
@@ -1946,16 +1871,17 @@ export default function App() {
     dashboard: "Cash Flow Dashboard", reports: "Reports", investments: "Investment", clients: "Master Clients", invoices: "Invoice Schedule",
     weekly: "Weekly Cash Flow", monthly: "Monthly Summary", outflows: "Outflow Schedule — Operating Budget",
     deferred: "Deferred Income", aging: "Accounts Receivable Aging", assumptions: "Assumptions & Settings",
-    users: "Team Access",
   };
 
   const moduleCards = [
     { id: "cashflow", name: "Cashflow", description: "Proyección de caja, facturación, inversiones y reportes.", icon: "↗", color: "#2A5AF4" },
     { id: "board", name: "Board", description: "Legal Docs Series A, tareas y entidades locales.", icon: "▦", color: "#2A5AF4" },
     { id: "people", name: "People", description: "Información y procesos del equipo.", icon: "◉", color: "#2A5AF4" },
-  ];
+    { id: "admin", name: "Administración", description: "Miembros, roles y acceso a los módulos.", icon: "◈", color: "#2A5AF4" },
+  ].filter((item) => item.id === "admin" ? isSuperAdmin(member) : canView(member, item.id));
+  const hasAccess = (id) => moduleCards.some((item) => item.id === id);
 
-  if (module !== "cashflow") {
+  if (module !== "cashflow" || !hasAccess("cashflow")) {
     const constructionModule = moduleCards.find((item) => item.id === module);
     return (
       <div style={{ minHeight: "100vh", background: "#FFFFFF", color: "#0F172A", fontFamily: "Geist,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif" }}>
@@ -1968,8 +1894,10 @@ export default function App() {
           {constructionModule && <button onClick={() => setModule("home")} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #D5DBE6", background: "#FFFFFF", borderRadius: 999, padding: "10px 16px", color: "#0F172A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← <span>Módulos</span></button>}
         </header>
         <main style={{ maxWidth: 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
-          {module === "board" ? (
-            <BoardWorkspace />
+          {module === "board" && hasAccess("board") ? (
+            <BoardWorkspace editable={canEdit(member, "board")} />
+          ) : module === "admin" && hasAccess("admin") ? (
+            <AdminWorkspace />
           ) : constructionModule ? (
             <section style={{ minHeight: 390, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 22, color: "#647084", fontSize: 11, fontWeight: 650, textTransform: "uppercase" }}>
@@ -1992,6 +1920,9 @@ export default function App() {
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#2A5AF4" }} /> MÓDULOS
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 16 }}>
+                {!moduleCards.length && (
+                  <div style={{ color: "#596579", fontSize: 14 }}>Aún no tienes módulos asignados. Pide acceso a un Super Admin.</div>
+                )}
                 {moduleCards.map((item) => (
                   <button key={item.id} onClick={() => setModule(item.id)}
                     style={{ minHeight: 208, display: "flex", flexDirection: "column", alignItems: "stretch", padding: 22, textAlign: "left", background: "#FFFFFF", border: "1px solid #DDE2EA", borderRadius: 10, color: "#0F172A", cursor: "pointer", boxShadow: "0 3px 12px rgba(15,23,42,.035)" }}>
@@ -2002,7 +1933,9 @@ export default function App() {
                     <span style={{ display: "block", fontSize: 21, fontWeight: 650 }}>{item.name}</span>
                     <span style={{ display: "block", marginTop: 8, color: "#596579", fontSize: 13, lineHeight: 1.55 }}>{item.description}</span>
                     <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto", paddingTop: 18 }}>
-                      <span style={{ color: item.id === "people" ? "#647084" : "#2A5AF4", fontSize: 12, fontWeight: 600 }}>{item.id === "people" ? "En construcción" : "Abrir módulo"}</span>
+                      <span style={{ color: item.id === "people" ? "#647084" : "#2A5AF4", fontSize: 12, fontWeight: 600 }}>
+                        {item.id === "people" ? "En construcción" : item.id !== "admin" && !canEdit(member, item.id) ? "Abrir · Solo lectura" : "Abrir módulo"}
+                      </span>
                       {item.id === "people" && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#159B76" }} />}
                     </span>
                   </button>
@@ -2044,7 +1977,7 @@ export default function App() {
         </div>
         <div className="cashflow-sidebar-footer" style={{ padding: "13px 16px", borderTop: `1px solid ${T.line}`, fontSize: 11, color: T.sideInk }}>
           <div>As of <b style={{ color: T.ink }}>{fmtD(M.today)}</b></div>
-          <div style={{ marginTop: 5, color: saved ? T.green : T.sub }}>{saved ? "● Synced — shared data" : "○ Not syncing (in-memory)"}</div>
+          <div style={{ marginTop: 5, color: saved ? T.green : T.sub }}>{!cashflowEditable ? "◐ View only — shared data" : saved ? "● Synced — shared data" : "○ Not syncing (in-memory)"}</div>
           <button onClick={loadShared}
             style={{ marginTop: 9, width: "100%", background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 6, padding: "7px 8px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
             ⟳ Sync latest changes
@@ -2062,18 +1995,24 @@ export default function App() {
             </b> · Overdue {fmtK(M.kpi.overdueAmt)}
           </div>
         </div>
-        {view === "dashboard" && <DashboardView M={M} A={state.assumptions} go={setView} />}
-        {view === "reports" && <ReportsView M={M} />}
-          {view === "investments" && <InvestmentsView state={state} setState={setState} today={M.today} />}
-        {view === "clients" && <ClientsView state={state} setState={setState} M={M} />}
-        {view === "invoices" && <InvoicesView state={state} setState={setState} M={M} />}
-        {view === "weekly" && <WeeklyView M={M} />}
-        {view === "monthly" && <MonthlyView M={M} />}
-        {view === "outflows" && <OutflowsView state={state} setState={setState} M={M} />}
-        {view === "deferred" && <DeferredView M={M} />}
-        {view === "aging" && <ArAgingView M={M} />}
-        {view === "assumptions" && <AssumptionsView state={state} setState={setState} resetAll={resetAll} saved={saved} />}
-        {view === "users" && <UsersView />}
+        {!cashflowEditable && (
+          <div role="status" style={{ marginBottom: 18, padding: "10px 14px", borderRadius: 8, background: T.blueBg, color: T.blue, fontSize: 13, fontWeight: 600 }}>
+            Solo lectura: puedes consultar Cashflow, pero tus cambios no se guardan.
+          </div>
+        )}
+        <ReadOnlyContext.Provider value={!cashflowEditable}>
+          {view === "dashboard" && <DashboardView M={M} A={state.assumptions} go={setView} />}
+          {view === "reports" && <ReportsView M={M} />}
+          {view === "investments" && <InvestmentsView state={state} setState={editState} today={M.today} />}
+          {view === "clients" && <ClientsView state={state} setState={editState} M={M} />}
+          {view === "invoices" && <InvoicesView state={state} setState={editState} M={M} />}
+          {view === "weekly" && <WeeklyView M={M} />}
+          {view === "monthly" && <MonthlyView M={M} />}
+          {view === "outflows" && <OutflowsView state={state} setState={editState} M={M} />}
+          {view === "deferred" && <DeferredView M={M} />}
+          {view === "aging" && <ArAgingView M={M} />}
+          {view === "assumptions" && <AssumptionsView state={state} setState={editState} resetAll={resetAll} saved={saved} />}
+        </ReadOnlyContext.Provider>
       </div>
     </div>
   );

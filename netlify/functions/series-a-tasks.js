@@ -64,6 +64,19 @@ const tasks = [
   { id: "wayra-side-letter-confirmation", title: "Confirm whether the Telefónica/Wayra side letter was executed", dueDate: null, dueLabel: "Confirm with Legal & Compliance", owner: "Legal & Compliance", source: "Closing Record, Section 6", details: "If executed, add the signed copy and track its no-hire, tag-along and share-surrender obligations. The closing record does not confirm execution.", status: "Open", recurring: false, attachments: [] },
 ];
 
+// Mirrors public.module_access() in supabase/security-hardening.sql and src/access.js.
+const moduleAccess = (member, module) => {
+  if (!member) return null;
+  const chosen = member.modules && member.modules[module];
+  switch (member.role) {
+    case "super_admin": return "edit";
+    case "board_member": return module === "board" ? "view" : null;
+    case "admin": return chosen === "view" || chosen === "edit" ? chosen : null;
+    case "colaborador": return chosen === "view" || chosen === "edit" ? "view" : null;
+    default: return null;
+  }
+};
+
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" },
@@ -115,11 +128,13 @@ exports.handler = async (event) => {
     const email = user.email?.toLowerCase();
     if (!email || !user.email_confirmed_at) return jsonResponse(403, { error: "Account is not authorized" });
 
-    const allowlistUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
-    allowlistUrl.search = new URLSearchParams({ select: "email", email: `eq.${email}`, limit: "1" }).toString();
-    const allowlistResponse = await fetch(allowlistUrl, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-    if (!allowlistResponse.ok) return jsonResponse(503, { error: "Could not verify document access" });
-    if (!(await allowlistResponse.json()).length) return jsonResponse(403, { error: "Account is not authorized" });
+    const memberUrl = new URL(`${supabaseUrl}/rest/v1/allowed_users`);
+    memberUrl.search = new URLSearchParams({ select: "email,role,modules", email: `eq.${email}`, limit: "1" }).toString();
+    const memberResponse = await fetch(memberUrl, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+    if (!memberResponse.ok) return jsonResponse(503, { error: "Could not verify access" });
+    const [member] = await memberResponse.json();
+    const boardAccess = moduleAccess(member, "board");
+    if (!boardAccess) return jsonResponse(403, { error: "Account is not authorized" });
 
     const readTasks = async () => {
       const url = new URL(`${supabaseUrl}/rest/v1/app_state`);
@@ -150,6 +165,10 @@ exports.handler = async (event) => {
     const params = new URLSearchParams(event.queryStringParameters || {});
     const body = event.httpMethod === "POST" ? readBody(event) : {};
     const action = event.httpMethod === "GET" ? params.get("action") : body.action;
+
+    // Reading (list, open-attachment) needs Board view access; every change needs edit access.
+    const readOnlyActions = new Set(["list", "open-attachment"]);
+    if (!readOnlyActions.has(action) && boardAccess !== "edit") return jsonResponse(403, { error: "You have view-only access to Board" });
 
     if (action === "list") return jsonResponse(200, { tasks: await readTasks() });
 
