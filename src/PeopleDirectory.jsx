@@ -359,7 +359,7 @@ function PersonModal({ employee, privateData, grants, documents, photos, lines, 
               <h3>Historial de nómina <span className="people-muted">· {history.months} meses · {usd(history.total)} pagados</span></h3>
               {history.exit && (
                 <div className="people-exit-note">
-                  Retiro el {fmtDate(history.exit.exit_date)} · liquidación {usd(num(history.exit.liquidation?.total), 2)} en la nómina de {history.exit.period_id}
+                  {history.exit.exit_type === "voluntario" ? "Renuncia" : "Retiro involuntario"} el {fmtDate(history.exit.exit_date)}{history.exit.liquidation ? ` · liquidación ${usd(num(history.exit.liquidation.total), 2)}` : " · sin liquidación"} en la nómina de {history.exit.period_id}
                 </div>
               )}
               <div className="people-history">

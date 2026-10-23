@@ -542,18 +542,29 @@ function AddPersonModal({ period, employees, lines, areas, onAdd, onClose }) {
   );
 }
 
-/** Exit + settlement (liquidación). The person stays in this month's payroll, highlighted in red. */
+const EXIT_TYPES = {
+  voluntario: { label: "Retiro voluntario", hint: "La persona renuncia. Solo se paga la nómina del mes hasta el día que trabajó." },
+  involuntario: { label: "Retiro involuntario", hint: "La empresa retira a la persona. Se paga el mes hasta el día trabajado más el plan de retiro (liquidación)." },
+};
+
+/**
+ * Exit of a person. First asks how they left: voluntary (resignation: only the days worked are
+ * paid) or involuntary (the company ends it: days worked + settlement per salary period). The
+ * person stays in this month's payroll, highlighted in red, and is excluded from later payrolls.
+ */
 function ExitModal({ line, period, employee, lines, canEdit, onRegister, onUndo, onRemoveOnly, onClose }) {
   const existing = line.liquidation;
   const defaultExit = line.exit_date || (period.pay_date && period.pay_date.slice(0, 7) === period.id ? period.pay_date : `${period.id}-28`);
+  const [exitType, setExitType] = useState(line.exit_type || (line.exit_date ? (existing ? "involuntario" : "voluntario") : null));
   const [exitDate, setExitDate] = useState(defaultExit);
   const [days, setDays] = useState(line.exit_date ? num(line.days) : exitMonthDays(period, defaultExit, num(line.days)));
   const [segments, setSegments] = useState(() => existing?.segments?.map((x) => ({ ...x }))
     || buildLiquidationSegments(employee || { id: line.employee_id }, lines, defaultExit, line.base_salary));
-  const [note, setNote] = useState(existing?.note || "");
+  const [note, setNote] = useState(existing?.note || line.exit_note || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const readOnly = !canEdit;
+  const involuntary = exitType === "involuntario";
 
   const changeExit = (value) => {
     setExitDate(value);
@@ -563,70 +574,105 @@ function ExitModal({ line, period, employee, lines, canEdit, onRegister, onUndo,
   };
   const setSeg = (i, patch) => setSegments((list) => list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const rows = segments.map((x) => ({ ...x, days: Math.max(0, daysBetween(x.from, x.to)), amount: segmentAmount(x) }));
-  const liquidationTotal = Math.round(rows.reduce((t, x) => t + x.amount, 0) * 100) / 100;
+  const liquidationTotal = involuntary ? Math.round(rows.reduce((t, x) => t + x.amount, 0) * 100) / 100 : 0;
   const monthPay = Math.round((num(line.base_salary) + num(line.allowance)) / 30 * num(days) * 100) / 100;
   const lineTotalPreview = monthPay + num(line.prima) + num(line.platform_fee) + adjustmentsTotal(line) + liquidationTotal;
 
   const submit = async () => {
     setError(null);
+    if (!exitType) return setError("Indica cómo salió la persona.");
     if (!exitDate) return setError("Indica la fecha de salida.");
-    if (rows.some((x) => !x.from || !x.to || x.to < x.from)) return setError("Revisa las fechas de los tramos.");
+    if (involuntary && rows.some((x) => !x.from || !x.to || x.to < x.from)) return setError("Revisa las fechas de los tramos.");
     setBusy(true);
     try {
-      await onRegister({ exitDate, days: Math.max(0, Math.min(30, num(days))), liquidation: { segments: rows, total: liquidationTotal, note: note.slice(0, 300), calculated_at: new Date().toISOString() } });
-    } catch (err) { setError(err.message || "No se pudo registrar el retiro."); setBusy(false); }
+      await onRegister({
+        exitType,
+        exitDate,
+        days: Math.max(0, Math.min(30, num(days))),
+        liquidation: involuntary
+          ? { segments: rows, total: liquidationTotal, note: note.slice(0, 300), calculated_at: new Date().toISOString() }
+          : null,
+      });
+    } catch (err) { setError(err.message || "No se pudo registrar la salida."); setBusy(false); }
   };
 
   return (
     <div className="people-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="people-modal" role="dialog" aria-label={`Retiro y liquidación de ${line.name}`}>
+      <div className="people-modal" role="dialog" aria-label={`Salida de ${line.name}`}>
         <div className="admin-form-header">
-          <h2>Retiro y liquidación · {line.name}</h2>
+          <h2>Salida · {line.name}</h2>
           <button className="admin-link-button" onClick={onClose}>Cerrar</button>
         </div>
-        <p className="admin-note">
-          La persona queda en la nómina de {periodLabel(period)} (en rojo) con el pago de los días trabajados más la liquidación, y no se incluye en las nóminas siguientes.
-          Liquidación = salario ÷ 365 × días de cada tramo de salario, igual que la hoja de liquidaciones del Excel.
-        </p>
-        <div className="admin-form-grid">
-          <label className="admin-field"><span>Fecha de salida</span><input type="date" value={exitDate} disabled={readOnly} onChange={(e) => changeExit(e.target.value)} /></label>
-          <label className="admin-field"><span>Días trabajados en {MONTH_NAMES[period.month - 1].toLowerCase()}</span><input type="number" min="0" max="30" step="0.5" value={days} disabled={readOnly} onChange={(e) => setDays(e.target.value)} /></label>
-          <label className="admin-field"><span>Ingreso</span><input type="date" value={employee?.start_date || ""} disabled /></label>
-        </div>
-        <table className="people-table people-adjustments">
-          <thead><tr><th>Desde</th><th>Hasta</th><th className="num">Salario</th><th className="num">Días</th><th className="num">Valor</th><th /></tr></thead>
-          <tbody>
-            {rows.map((x, i) => (
-              <tr key={i}>
-                <td><input className="people-cell-input" type="date" value={x.from} disabled={readOnly} onChange={(e) => setSeg(i, { from: e.target.value })} /></td>
-                <td><input className="people-cell-input" type="date" value={x.to} disabled={readOnly} onChange={(e) => setSeg(i, { to: e.target.value })} /></td>
-                <td className="num"><input className="people-cell-input" type="number" step="0.01" value={x.salary} disabled={readOnly} style={{ width: 96 }} onChange={(e) => setSeg(i, { salary: e.target.value })} /></td>
-                <td className="num">{x.days}</td>
-                <td className="num">{usd(x.amount, 2)}</td>
-                <td>{!readOnly && rows.length > 1 && <button className="admin-link-button is-danger" onClick={() => setSegments((list) => list.filter((_, j) => j !== i))}>Quitar</button>}</td>
-              </tr>
+
+        <fieldset className="admin-fieldset">
+          <legend>¿Cómo salió la persona?</legend>
+          <div className="admin-role-options">
+            {Object.entries(EXIT_TYPES).map(([id, t]) => (
+              <label key={id} className={`admin-role-option${exitType === id ? " is-selected" : ""}`}>
+                <input type="radio" name="exit-type" value={id} checked={exitType === id} disabled={readOnly} onChange={() => setExitType(id)} />
+                <span className="admin-role-name">{t.label}</span>
+                <span className="admin-role-description">{t.hint}</span>
+              </label>
             ))}
-          </tbody>
-          <tfoot><tr><td colSpan={4}>Liquidación (plan de retiro)</td><td className="num">{usd(liquidationTotal, 2)}</td><td /></tr></tfoot>
-        </table>
-        {!readOnly && (
-          <button className="people-secondary-button people-align-start" onClick={() => setSegments((list) => [...list, { from: exitDate, to: exitDate, salary: list[list.length - 1]?.salary || 0 }])}>+ Agregar tramo</button>
+          </div>
+        </fieldset>
+
+        {exitType && (
+          <>
+            <div className="admin-form-grid">
+              <label className="admin-field"><span>Fecha de salida</span><input type="date" value={exitDate} disabled={readOnly} onChange={(e) => changeExit(e.target.value)} /></label>
+              <label className="admin-field"><span>Días trabajados en {MONTH_NAMES[period.month - 1].toLowerCase()}</span><input type="number" min="0" max="30" step="0.5" value={days} disabled={readOnly} onChange={(e) => setDays(e.target.value)} /></label>
+              <label className="admin-field"><span>Ingreso</span><input type="date" value={employee?.start_date || ""} disabled /></label>
+            </div>
+
+            {involuntary && (
+              <>
+                <p className="admin-note">
+                  Plan de retiro = salario ÷ 365 × días de cada tramo de salario desde el ingreso, igual que la hoja de liquidaciones del Excel. Los tramos se arman con el historial de salario y se pueden ajustar.
+                </p>
+                <table className="people-table people-adjustments">
+                  <thead><tr><th>Desde</th><th>Hasta</th><th className="num">Salario</th><th className="num">Días</th><th className="num">Valor</th><th /></tr></thead>
+                  <tbody>
+                    {rows.map((x, i) => (
+                      <tr key={i}>
+                        <td><input className="people-cell-input" type="date" value={x.from} disabled={readOnly} onChange={(e) => setSeg(i, { from: e.target.value })} /></td>
+                        <td><input className="people-cell-input" type="date" value={x.to} disabled={readOnly} onChange={(e) => setSeg(i, { to: e.target.value })} /></td>
+                        <td className="num"><input className="people-cell-input" type="number" step="0.01" value={x.salary} disabled={readOnly} style={{ width: 96 }} onChange={(e) => setSeg(i, { salary: e.target.value })} /></td>
+                        <td className="num">{x.days}</td>
+                        <td className="num">{usd(x.amount, 2)}</td>
+                        <td>{!readOnly && rows.length > 1 && <button className="admin-link-button is-danger" onClick={() => setSegments((list) => list.filter((_, j) => j !== i))}>Quitar</button>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr><td colSpan={4}>Plan de retiro (liquidación)</td><td className="num">{usd(liquidationTotal, 2)}</td><td /></tr></tfoot>
+                </table>
+                {!readOnly && (
+                  <button className="people-secondary-button people-align-start" onClick={() => setSegments((list) => [...list, { from: exitDate, to: exitDate, salary: list[list.length - 1]?.salary || 0 }])}>+ Agregar tramo</button>
+                )}
+              </>
+            )}
+
+            <label className="admin-field"><span>Nota</span><input value={note} maxLength={300} disabled={readOnly} onChange={(e) => setNote(e.target.value)} placeholder={involuntary ? "Motivo, acuerdos, pagos adicionales…" : "Fecha de la carta de renuncia, observaciones…"} /></label>
+
+            <div className="people-exit-summary">
+              <div><span>Pago del mes ({num(days)} días)</span><b>{usd(monthPay, 2)}</b></div>
+              {involuntary && <div><span>Plan de retiro</span><b>{usd(liquidationTotal, 2)}</b></div>}
+              <div className="is-total"><span>Total de la línea (con prima, comisión y novedades)</span><b>{usd(lineTotalPreview, 2)}</b></div>
+            </div>
+          </>
         )}
-        <label className="admin-field"><span>Nota</span><input value={note} maxLength={300} disabled={readOnly} onChange={(e) => setNote(e.target.value)} placeholder="Motivo, acuerdos, pagos adicionales…" /></label>
-        <div className="people-exit-summary">
-          <div><span>Pago del mes ({num(days)} días)</span><b>{usd(monthPay, 2)}</b></div>
-          <div><span>Liquidación</span><b>{usd(liquidationTotal, 2)}</b></div>
-          <div className="is-total"><span>Total de la línea (con prima, comisión y novedades)</span><b>{usd(lineTotalPreview, 2)}</b></div>
-        </div>
+
         {error && <div className="board-doc-error" role="alert">{error}</div>}
         {!readOnly && (
           <div className="people-modal-actions is-split">
             <div>
               {line.exit_date
-                ? <button className="admin-link-button" disabled={busy} onClick={async () => { setBusy(true); await onUndo(); }}>Deshacer retiro</button>
-                : <button className="admin-link-button is-danger" disabled={busy} onClick={async () => { if (window.confirm(`¿Quitar a ${line.name} de esta nómina sin registrar retiro (por ejemplo, si se agregó por error)?`)) { setBusy(true); await onRemoveOnly(); } }}>Quitar sin liquidar (error de carga)</button>}
+                ? <button className="admin-link-button" disabled={busy} onClick={async () => { setBusy(true); await onUndo(); }}>Deshacer salida</button>
+                : <button className="admin-link-button is-danger" disabled={busy} onClick={async () => { if (window.confirm(`¿Quitar a ${line.name} de esta nómina sin registrar salida (por ejemplo, si se agregó por error)?`)) { setBusy(true); await onRemoveOnly(); } }}>Quitar sin registrar salida (error de carga)</button>}
             </div>
-            <button className="people-danger-button is-solid" disabled={busy} onClick={submit}>{busy ? "Guardando…" : line.exit_date ? "Actualizar liquidación" : "Registrar retiro y liquidación"}</button>
+            <button className="people-danger-button is-solid" disabled={busy || !exitType} onClick={submit}>
+              {busy ? "Guardando…" : line.exit_date ? "Actualizar salida" : involuntary ? "Registrar retiro y liquidación" : "Registrar renuncia"}
+            </button>
           </div>
         )}
       </div>
@@ -719,14 +765,14 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
   };
 
   // Retiro: the line stays in this payroll (red) with the days worked plus the settlement.
-  const registerExit = async (line, { exitDate, days, liquidation }) => {
-    if (!(await updateLine(line, { exit_date: exitDate, days, liquidation }))) return;
+  const registerExit = async (line, { exitType, exitDate, days, liquidation }) => {
+    if (!(await updateLine(line, { exit_type: exitType, exit_date: exitDate, days, liquidation }))) return;
     await track(() => setEmployeeStatus(line.employee_id, { active: false, end_date: exitDate }));
     setRemoving(null);
   };
 
   const undoExit = async (line) => {
-    if (!(await updateLine(line, { exit_date: null, liquidation: null, days: 30 }))) return;
+    if (!(await updateLine(line, { exit_type: null, exit_date: null, liquidation: null, days: 30 }))) return;
     await track(() => setEmployeeStatus(line.employee_id, { active: true, end_date: null }));
     setRemoving(null);
   };
@@ -789,8 +835,8 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
         <Kpi label="Personas" value={allPeriodLines.length} />
         <Kpi label="Novedades" value={usd(adjTotal, 2)} sub={`${allPeriodLines.filter((l) => l.adjustments?.length).length} personas con novedades`} />
         {allPeriodLines.some((l) => l.exit_date) && (
-          <Kpi label="Retiros" value={allPeriodLines.filter((l) => l.exit_date).length}
-            sub={`Liquidaciones ${usd(allPeriodLines.reduce((t, l) => t + num(l.liquidation?.total), 0), 2)}`} tone="up" />
+          <Kpi label="Salidas" value={allPeriodLines.filter((l) => l.exit_date).length}
+            sub={`${allPeriodLines.filter((l) => l.exit_type === "voluntario").length} renuncias · liquidaciones ${usd(allPeriodLines.reduce((t, l) => t + num(l.liquidation?.total), 0), 2)}`} tone="up" />
         )}
         {[6, 12].includes(period.month) && <Kpi label="Prima" value={usd(primaTotal, 2)} sub="Salario × días del semestre / 180" />}
       </div>
@@ -824,7 +870,8 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
                     <div className="people-person">{l.name}</div>
                     {l.exit_date ? (
                       <button className="people-exit-badge" onClick={() => setRemoving(l)}>
-                        Retiro {new Date(`${l.exit_date}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })} · Liquidación {usd(num(l.liquidation?.total), 2)}
+                        {l.exit_type === "voluntario" ? "Renuncia" : "Retiro involuntario"} {new Date(`${l.exit_date}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })}
+                        {l.liquidation ? ` · Liquidación ${usd(num(l.liquidation.total), 2)}` : " · sin liquidación"}
                       </button>
                     ) : <div className="people-muted">{l.role_title}</div>}
                     </div>
@@ -857,7 +904,7 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
                     </td>
                   </>}
                   <td className="num"><b>{usd(lineTotal(l), 2)}</b></td>
-                  <td>{canEdit && !l.exit_date && !imported && <button className="board-task-remove-file" title="Retiro y liquidación" aria-label={`Retirar a ${l.name}`} onClick={() => setRemoving(l)}>×</button>}</td>
+                  <td>{canEdit && !l.exit_date && !imported && <button className="board-task-remove-file" title="Sacar de la nómina (renuncia o retiro)" aria-label={`Retirar a ${l.name}`} onClick={() => setRemoving(l)}>×</button>}</td>
                 </tr>
               );
             })}

@@ -454,3 +454,14 @@ end;
 $$;
 revoke all on function public.people_sync_my_avatar(text) from public, anon;
 grant execute on function public.people_sync_my_avatar(text) to authenticated;
+
+-- How the person left: 'voluntario' (resignation: only the days worked are paid) or
+-- 'involuntario' (the company ends the contract: days worked + settlement / plan de retiro).
+alter table public.payroll_lines add column if not exists exit_type text;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'payroll_lines_exit_type_check') then
+    alter table public.payroll_lines add constraint payroll_lines_exit_type_check
+      check (exit_type is null or exit_type in ('voluntario', 'involuntario'));
+  end if;
+end $$;
