@@ -15,6 +15,7 @@ import PeopleWorkspace from "./People";
 import CapTableView from "./BoardCapTable";
 import LocalEntityView from "./BoardEntities";
 import FinancialsTool from "./Consolidation";
+import KpisView from "./BoardKpis";
 import "./board.css";
 
 // True when the signed-in member can only view the current module.
@@ -1665,6 +1666,8 @@ function BoardWorkspace({ editable }) {
           <CapTableView editable={editable} />
         ) : section === "consolidated-financials" ? (
           <FinancialsTool editable={editable} />
+        ) : section === "consolidated-kpis" ? (
+          <KpisView />
         ) : selectedEntity ? (
           <LocalEntityView key={selectedEntity.id} entityId={selectedEntity.id.replace(/^entity-/, "")} label={selectedEntity.label} editable={editable} />
         ) : selectedConsolidated ? (

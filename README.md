@@ -25,6 +25,7 @@ src/People.jsx        → módulo People (reportes, payroll mensual, cálculo de
 src/PeopleDirectory.jsx → directorio de personas (fichas, datos sensibles, stock options)
 src/Consolidation.jsx → herramienta de consolidación mensual (Board → Consolidated Data → Financials)
 src/consolidationEngine.js → cálculos de la consolidación (conversión, CTA, eliminaciones, validaciones)
+src/BoardKpis.jsx     → KPIs de MRR y ARR desde la consolidación
 src/BoardEntities.jsx → documentos de cada entidad local
 src/PdfReader.jsx     → lector PDF integrado (PDF.js)
 src/peopleUtils.js    → cálculos compartidos de People (totales, prima, liquidación, Deel)

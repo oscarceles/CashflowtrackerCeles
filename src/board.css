@@ -167,3 +167,9 @@
 @media (max-width: 1100px) {
   .cons-entity-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Board · KPIs ---------- */
+.kpi-tiles .kpi-hero b { font-size: 24px; }
+.kpi-delta { font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kpi-delta.is-up { color: #0f7a5c; }
+.kpi-delta.is-down { color: #b42318; }

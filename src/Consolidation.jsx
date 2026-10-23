@@ -38,7 +38,7 @@ function AmountInput({ value, onCommit, disabled, placeholder }) {
   );
 }
 
-function useConsolidationData() {
+export function useConsolidationData() {
   const [state, setState] = useState({ entities: [], periods: [], entries: [], docs: [], loading: true, error: null });
   const reload = async () => {
     const [e, p, x, d] = await Promise.all([
