@@ -1321,3 +1321,48 @@
   background: #e7f6f0;
   font-size: 13px;
 }
+
+/* ---------- Board · Cap Table ---------- */
+.cap-updated {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid #c9d7fb;
+  border-radius: 8px;
+  background: #f5f8ff;
+  text-align: right;
+}
+
+.cap-updated span { color: #647084; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.cap-updated b { color: #0f172a; font-size: 14px; font-weight: 650; }
+.cap-updated small { color: #647084; font-size: 11px; }
+
+.cap-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cap-summary div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.cap-summary span { color: #647084; font-size: 11px; font-weight: 650; }
+.cap-summary b { color: #0f172a; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.cap-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cap-table tfoot td { padding: 10px 14px; border-top: 1px solid #dce3ed; background: #f8fafc; font-weight: 650; }
+
+.cap-cell {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #0f172a;
+  background: #f6f8fc;
+  font: inherit;
+  font-size: 13px;
+}
+
+.cap-table td.num .cap-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.cap-cell:hover { border-color: #dce3ed; }
+.cap-cell:focus { border-color: #2a5af4; outline: none; background: #fff; box-shadow: 0 0 0 3px #e3eaff; }
+.cap-actions { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+
+@media (max-width: 760px) {
+  .cap-updated { align-items: flex-start; text-align: left; }
+}

@@ -11,6 +11,7 @@ import { useMember, canView, canEdit, isSuperAdmin } from "./access";
 import AdminWorkspace from "./Admin";
 import UserMenu from "./UserMenu";
 import PeopleWorkspace from "./People";
+import CapTableView from "./BoardCapTable";
 
 // True when the signed-in member can only view the current module.
 const ReadOnlyContext = React.createContext(false);
@@ -1598,6 +1599,7 @@ function SeriesATasksView({ editable }) {
 function BoardWorkspace({ editable }) {
   const [section, setSection] = useState("legal-series-a");
   const [entitiesOpen, setEntitiesOpen] = useState(true);
+  const [consolidatedOpen, setConsolidatedOpen] = useState(true);
   const [documents, setDocuments] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [search, setSearch] = useState("");
@@ -1614,6 +1616,11 @@ function BoardWorkspace({ editable }) {
     { id: "entity-celes-chile", label: "Celes (Chile)" },
   ];
   const selectedEntity = entitySections.find((entity) => entity.id === section);
+  const consolidatedSections = [
+    { id: "consolidated-financials", label: "Financials", text: "Estados financieros consolidados de las entidades del grupo." },
+    { id: "consolidated-kpis", label: "KPIs", text: "Indicadores clave consolidados del negocio." },
+  ];
+  const selectedConsolidated = consolidatedSections.find((item) => item.id === section);
 
   useEffect(() => {
     if (section !== "legal-series-a") return undefined;
@@ -1691,6 +1698,21 @@ function BoardWorkspace({ editable }) {
             ))}
           </div>
         )}
+        <button className="board-section-link board-section-parent" aria-expanded={consolidatedOpen} onClick={() => setConsolidatedOpen((open) => !open)}>
+          <span className="board-section-icon" aria-hidden="true">▥</span> Consolidated Data <span className="board-section-chevron">{consolidatedOpen ? "▾" : "▸"}</span>
+        </button>
+        {consolidatedOpen && (
+          <div className="board-entity-links">
+            {consolidatedSections.map((item) => (
+              <button key={item.id} className={`board-section-link board-entity-link${section === item.id ? " is-active" : ""}`} aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <button className={`board-section-link${section === "cap-table" ? " is-active" : ""}`} aria-current={section === "cap-table" ? "page" : undefined} onClick={() => setSection("cap-table")}>
+          <span className="board-section-icon" aria-hidden="true">◔</span> Cap Table
+        </button>
       </aside>
 
       <div className="board-section-content">
@@ -1748,6 +1770,15 @@ function BoardWorkspace({ editable }) {
           </div>
         ) : section === "series-a-tasks" ? (
           <SeriesATasksView editable={editable} />
+        ) : section === "cap-table" ? (
+          <CapTableView editable={editable} />
+        ) : selectedConsolidated ? (
+          <section className="board-section-placeholder">
+            <div className="board-eyebrow">BOARD · CONSOLIDATED DATA</div>
+            <h1>{selectedConsolidated.label}</h1>
+            <p>{selectedConsolidated.text}</p>
+            <div className="board-empty-state">No hay contenido en esta sección todavía.</div>
+          </section>
         ) : (
           <section className="board-section-placeholder">
             <div className="board-eyebrow">BOARD · {selectedEntity ? "LOCAL ENTITIES" : "SERIES A"}</div>
