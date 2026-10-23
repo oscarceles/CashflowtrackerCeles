@@ -3,7 +3,12 @@
 // invitation (Authentication → Email Templates → Invite user); people who already have an
 // account get a magic sign-in link instead.
 const ROLE_NAMES = { super_admin: "Super Admin", admin: "Admin", colaborador: "Colaborador", board_member: "Board Member" };
-const SITE_URL = "https://cashflow.celes.ai";
+// Links in the email point to the domain the admin is using (falls back to the primary domain).
+const SITE_URLS = ["https://workspace.celes.ai", "https://cashflow.celes.ai"];
+const siteUrlFor = (event) => {
+  const origin = (event.headers.origin || event.headers.Origin || "").replace(/\/$/, "");
+  return SITE_URLS.includes(origin) ? origin : SITE_URLS[1];
+};
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -13,6 +18,7 @@ const jsonResponse = (statusCode, body) => ({
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return jsonResponse(405, { error: "Method not allowed" });
+  const SITE_URL = siteUrlFor(event);
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
