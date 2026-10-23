@@ -9,7 +9,7 @@ import {
   MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, suggestedPrima, suggestedDays, downloadCsv,
   daysBetween, segmentAmount, buildLiquidationSegments, exitMonthDays, DEEL_HEADER, buildDeelRows,
 } from "./peopleUtils";
-import DirectoryView from "./PeopleDirectory";
+import DirectoryView, { PersonAvatar } from "./PeopleDirectory";
 
 /* ============================ data ============================ */
 
@@ -23,16 +23,28 @@ async function fetchAll(table, order) {
   }
 }
 
+/** Signed URLs (1 h) for photos uploaded to the private people-photos bucket. */
+async function signedPhotoUrls(employees) {
+  const withPhoto = employees.filter((e) => e.photo_path);
+  if (!withPhoto.length) return {};
+  const { data, error } = await supabase.storage.from("people-photos").createSignedUrls(withPhoto.map((e) => e.photo_path), 3600);
+  if (error || !data) return {};
+  const byPath = Object.fromEntries(data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl]));
+  return Object.fromEntries(withPhoto.filter((e) => byPath[e.photo_path]).map((e) => [e.id, byPath[e.photo_path]]));
+}
+
 function usePeopleData() {
-  const [data, setData] = useState({ periods: [], lines: [], employees: [], grants: [], privates: [], loading: true, error: null });
+  const [data, setData] = useState({ periods: [], lines: [], employees: [], grants: [], privates: [], documents: [], photos: {}, loading: true, error: null });
   const reload = async () => {
     try {
       // people_private only returns rows for People editors (RLS); viewers get an empty list.
-      const [periods, lines, employees, grants, privates] = await Promise.all([
+      // people_private and people_documents only return rows for People editors (RLS).
+      const [periods, lines, employees, grants, privates, documents] = await Promise.all([
         fetchAll("payroll_periods", "id"), fetchAll("payroll_lines", "name"), fetchAll("people_employees", "name"),
-        fetchAll("people_equity_grants", "vesting_start"), fetchAll("people_private", "employee_id"),
+        fetchAll("people_equity_grants", "vesting_start"), fetchAll("people_private", "employee_id"), fetchAll("people_documents", "name"),
       ]);
-      setData({ periods, lines, employees, grants, privates, loading: false, error: null });
+      const photos = await signedPhotoUrls(employees);
+      setData({ periods, lines, employees, grants, privates, documents, photos, loading: false, error: null });
     } catch (err) {
       setData((d) => ({ ...d, loading: false, error: err.message || "No se pudo cargar la información de People." }));
     }
@@ -622,7 +634,7 @@ function ExitModal({ line, period, employee, lines, canEdit, onRegister, onUndo,
   );
 }
 
-function PayrollCalcView({ periods, lines, employees, editable, patchLocal, reload }) {
+function PayrollCalcView({ periods, lines, employees, photos, editable, patchLocal, reload }) {
   const member = useMember();
   const sortedPeriods = [...periods].sort((a, b) => b.id.localeCompare(a.id));
   const firstDraft = [...periods].filter((p) => p.status === "draft").sort((a, b) => a.id.localeCompare(b.id))[0];
@@ -806,12 +818,17 @@ function PayrollCalcView({ periods, lines, employees, editable, patchLocal, relo
               return (
                 <tr key={l.id} className={l.exit_date ? "is-exit" : undefined}>
                   <td className="people-sticky">
+                    <div className="people-calc-person">
+                    <PersonAvatar employee={employees.find((e) => e.id === l.employee_id) || { name: l.name, area: l.area }} photos={photos} size="small" />
+                    <div>
                     <div className="people-person">{l.name}</div>
                     {l.exit_date ? (
                       <button className="people-exit-badge" onClick={() => setRemoving(l)}>
                         Retiro {new Date(`${l.exit_date}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })} · Liquidación {usd(num(l.liquidation?.total), 2)}
                       </button>
                     ) : <div className="people-muted">{l.role_title}</div>}
+                    </div>
+                    </div>
                   </td>
                   <td>
                     {off ? (l.area || "—") : (
@@ -905,10 +922,10 @@ export default function PeopleWorkspace({ editable }) {
         {data.error && <div className="board-doc-error" role="alert">{data.error}</div>}
         {data.loading ? <div className="board-empty-state">Cargando…</div> : (
           <>
-            {section === "directory" && <DirectoryView employees={data.employees} privates={data.privates} grants={data.grants} lines={data.lines} periods={data.periods} editable={editable} patchLocal={data.patchLocal} />}
+            {section === "directory" && <DirectoryView employees={data.employees} privates={data.privates} grants={data.grants} documents={data.documents} photos={data.photos} lines={data.lines} periods={data.periods} editable={editable} patchLocal={data.patchLocal} />}
             {section === "reports" && <ReportsView periods={data.periods} lines={data.lines} employees={data.employees} />}
             {section === "monthly" && <MonthlyPayrollView periods={data.periods} lines={data.lines} />}
-            {section === "calc" && <PayrollCalcView periods={data.periods} lines={data.lines} employees={data.employees} editable={editable} patchLocal={data.patchLocal} reload={data.reload} />}
+            {section === "calc" && <PayrollCalcView periods={data.periods} lines={data.lines} employees={data.employees} photos={data.photos} editable={editable} patchLocal={data.patchLocal} reload={data.reload} />}
           </>
         )}
       </div>

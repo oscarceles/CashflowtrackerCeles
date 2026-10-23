@@ -29,7 +29,7 @@ supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y 
 supabase/people.sql   → tablas, reglas y cierre de nómina del módulo People (los datos salariales no van al repo)
 supabase/security-hardening.sql → roles de miembros, RLS por rol/módulo + hook que bloquea registros fuera de la lista (correr después de schema.sql)
 netlify.toml          → build, funciones y headers de seguridad (CSP, HSTS, anti-iframe)
-netlify/functions/    → funciones server-side de Board (documentos Series A y tareas/adjuntos)
+netlify/functions/    → funciones server-side: Board (documentos Series A y tareas/adjuntos) e invitación por correo de miembros
 scripts/deploy-production.mjs → deploy a producción con las credenciales server-side de Board
 ```
 

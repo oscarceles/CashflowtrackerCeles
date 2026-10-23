@@ -346,3 +346,19 @@
 }
 .people-directory td:nth-child(4) { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .people-directory td:nth-child(2) { white-space: normal; min-width: 120px; }
+
+/* Photos & documents */
+img.people-avatar.is-photo { object-fit: cover; background: #eef1f5; }
+.people-avatar.is-small { width: 26px; height: 26px; font-size: 10px; }
+.people-calc-person { display: flex; align-items: center; gap: 8px; }
+.people-photo-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.people-photo-button { padding: 0; border: 0; color: #1746d1; background: transparent; font: inherit; font-size: 10.5px; font-weight: 600; cursor: pointer; }
+
+.people-docs { margin: 0 0 4px; padding: 0; list-style: none; }
+.people-docs li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f0f2f6; font-size: 12.5px; }
+.people-doc-name { overflow: hidden; padding: 0; border: 0; color: #1746d1; background: transparent; font: inherit; font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; flex: 1; }
+.people-doc-name:hover { text-decoration: underline; }
+.people-doc-kind { flex: none; padding: 2px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 650; }
+.people-doc-kind.is-stock { color: #4a3aa7; background: #efedfb; }
+.people-doc-kind.is-deel { color: #1746d1; background: #eef3ff; }
+.people-doc-kind.is-other { color: #40516a; background: #f1f4f8; }

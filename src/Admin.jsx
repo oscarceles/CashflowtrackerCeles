@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listMembers, addMember, updateMember, removeMember } from "./supabaseClient";
+import { listMembers, addMember, updateMember, removeMember, sendMemberInvite } from "./supabaseClient";
 import { MODULES, ROLES, roleName, moduleAccess, useMember } from "./access";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -133,6 +133,18 @@ function MembersView() {
   const [editing, setEditing] = useState(null); // { member, isNew }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const notify = async (email) => {
+    try {
+      const sent = await sendMemberInvite(email);
+      setNotice(sent === "invite"
+        ? `Se envió un correo de invitación a ${email}.`
+        : `${email} ya tenía cuenta: se le envió un correo con un enlace de acceso.`);
+    } catch (err) {
+      setError(`El miembro quedó guardado, pero no se pudo enviar el correo: ${err.message}`);
+    }
+  };
 
   const load = async () => {
     setError(null);
@@ -151,10 +163,12 @@ function MembersView() {
   const save = async (form) => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       if (editing.isNew) {
         if (members?.some((member) => member.email === form.email)) throw new Error("Ese correo ya es miembro.");
         await addMember(form, me.email);
+        await notify(form.email);
       } else {
         await updateMember(form.email, form, me.email);
       }
@@ -193,6 +207,7 @@ function MembersView() {
       </div>
 
       {error && <div className="board-doc-error" role="alert">{error}</div>}
+      {notice && <div className="admin-notice" role="status">{notice}</div>}
 
       {editing ? (
         <MemberForm key={editing.member.email || "new"} initial={editing.member} isNew={editing.isNew}
@@ -242,6 +257,10 @@ function MembersView() {
                           title={isMe ? "Otro Super Admin debe cambiar tu rol" : "Editar miembro"}
                           onClick={() => setEditing({ member: { ...member, modules: { ...(member.modules || {}) } }, isNew: false })}>
                           Editar
+                        </button>
+                        <button className="admin-link-button" disabled={busy || isMe} title="Enviar de nuevo el correo de acceso"
+                          onClick={async () => { setBusy(true); setError(null); setNotice(null); await notify(member.email); setBusy(false); }}>
+                          Reenviar
                         </button>
                         <button className="admin-link-button is-danger" disabled={busy || isMe}
                           title={isMe ? "Otro Super Admin debe quitar tu acceso" : "Quitar acceso"}

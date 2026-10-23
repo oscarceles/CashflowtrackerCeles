@@ -248,6 +248,10 @@ export default function AuthGate({ children }) {
     setNotAllowed(null);
     // Google sign-in provides the profile name and photo in user_metadata.
     const meta = s.user.user_metadata || {};
+    // Keep the member's Google photo on their People directory card (best effort).
+    if (meta.avatar_url || meta.picture) {
+      supabase.rpc("people_sync_my_avatar", { url: meta.avatar_url || meta.picture }).then(() => {}, () => {});
+    }
     setMember({
       ...record,
       display_name: record.full_name || meta.full_name || meta.name || null,

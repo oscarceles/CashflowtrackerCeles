@@ -374,3 +374,83 @@ create policy "People editors write equity" on public.people_equity_grants for a
   with check (public.module_access('people') = 'edit');
 
 revoke all on table public.people_private, public.people_equity_grants from anon;
+
+-- ===================== Documents & photos =====================================
+
+alter table public.people_employees
+  add column if not exists avatar_url text,      -- Google profile photo (synced at sign-in)
+  add column if not exists photo_path text;      -- uploaded photo in storage bucket people-photos
+
+create table if not exists public.people_documents (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.people_employees (id) on delete cascade,
+  kind text not null default 'Otro' check (kind in ('Stock options', 'Contrato Deel', 'Otro')),
+  name text not null,
+  path text not null unique,
+  size bigint,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+create index if not exists people_documents_employee_idx on public.people_documents (employee_id);
+drop trigger if exists people_documents_touch on public.people_documents;
+create trigger people_documents_touch before insert or update on public.people_documents
+  for each row execute function public.people_employee_touch();
+
+alter table public.people_documents enable row level security;
+drop policy if exists "People editors manage documents" on public.people_documents;
+create policy "People editors manage documents" on public.people_documents for all to authenticated
+  using (public.module_access('people') = 'edit')
+  with check (public.module_access('people') = 'edit');
+revoke all on table public.people_documents from anon;
+
+-- Private buckets: contracts readable only by People editors; photos by People viewers.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('people-documents', 'people-documents', false, 26214400, array['application/pdf', 'image/png', 'image/jpeg']),
+  ('people-photos', 'people-photos', false, 5242880, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "People editors read documents" on storage.objects;
+drop policy if exists "People editors upload documents" on storage.objects;
+drop policy if exists "People editors delete documents" on storage.objects;
+drop policy if exists "People viewers read photos" on storage.objects;
+drop policy if exists "People editors upload photos" on storage.objects;
+drop policy if exists "People editors delete photos" on storage.objects;
+
+create policy "People editors read documents" on storage.objects for select to authenticated
+  using (bucket_id = 'people-documents' and public.module_access('people') = 'edit');
+create policy "People editors upload documents" on storage.objects for insert to authenticated
+  with check (bucket_id = 'people-documents' and public.module_access('people') = 'edit');
+create policy "People editors delete documents" on storage.objects for delete to authenticated
+  using (bucket_id = 'people-documents' and public.module_access('people') = 'edit');
+create policy "People viewers read photos" on storage.objects for select to authenticated
+  using (bucket_id = 'people-photos' and public.module_access('people') is not null);
+create policy "People editors upload photos" on storage.objects for insert to authenticated
+  with check (bucket_id = 'people-photos' and public.module_access('people') = 'edit');
+create policy "People editors delete photos" on storage.objects for delete to authenticated
+  using (bucket_id = 'people-photos' and public.module_access('people') = 'edit');
+
+-- Called by the app after a Google sign-in: stores the caller's own Google photo on
+-- the directory card(s) that carry the caller's email. Only Google photo URLs accepted.
+create or replace function public.people_sync_my_avatar(url text)
+returns int
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare me text := public.current_member_email(); n int;
+begin
+  if me = '' or url is null or url !~ '^https://[a-z0-9-]+\.googleusercontent\.com/' then
+    return 0;
+  end if;
+  update public.people_employees
+    set avatar_url = url
+    where me in (lower(work_email), lower(personal_email), lower(deel_email))
+      and avatar_url is distinct from url;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.people_sync_my_avatar(text) from public, anon;
+grant execute on function public.people_sync_my_avatar(text) to authenticated;

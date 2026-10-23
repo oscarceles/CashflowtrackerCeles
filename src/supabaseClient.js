@@ -65,3 +65,17 @@ export async function removeMember(email) {
     .eq("email", email.toLowerCase());
   if (error) throw error;
 }
+
+// Emails a member that was just added (invitation for new accounts, sign-in link otherwise).
+export async function sendMemberInvite(email) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+  const response = await fetch("/.netlify/functions/member-invite", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "No se pudo enviar el correo.");
+  return result.sent;
+}

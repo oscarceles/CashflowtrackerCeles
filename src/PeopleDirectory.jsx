@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { MONTH_NAMES, areaColor, usd, num, lineTotal } from "./peopleUtils";
 
@@ -15,6 +15,90 @@ function tenure(start, end) {
   if (months < 0) return "Por ingresar";
   const y = Math.floor(months / 12), m = months % 12;
   return [y && `${y} ${y === 1 ? "año" : "años"}`, m && `${m} ${m === 1 ? "mes" : "meses"}`].filter(Boolean).join(" ") || "Menos de 1 mes";
+}
+
+/** Photo (uploaded, else Google) or initials. */
+export function PersonAvatar({ employee, photos, size }) {
+  const [failed, setFailed] = useState(false);
+  const src = (photos && employee.id && photos[employee.id]) || employee.avatar_url;
+  const cls = `people-avatar${size === "large" ? " is-large" : size === "small" ? " is-small" : ""}`;
+  if (src && !failed) return <img className={`${cls} is-photo`} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
+  return <span className={cls} style={{ background: areaColor(employee.area) }} aria-hidden="true">{initials(employee.name || "?")}</span>;
+}
+
+const DOC_KINDS = ["Contrato Deel", "Stock options", "Otro"];
+const fileSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const safeFileName = (name) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9._ -]/g, "").replace(/\s+/g, "_");
+
+function DocumentsSection({ employeeId, documents, patchLocal }) {
+  const inputRef = useRef(null);
+  const [kind, setKind] = useState("Contrato Deel");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const open = async (doc) => {
+    setError(null);
+    const tab = window.open("about:blank", "_blank");
+    const { data, error: err } = await supabase.storage.from("people-documents").createSignedUrl(doc.path, 300);
+    if (err || !data?.signedUrl) { tab?.close(); setError("No se pudo abrir el documento."); return; }
+    if (tab) { tab.opener = null; tab.location.href = data.signedUrl; } else window.location.assign(data.signedUrl);
+  };
+
+  const upload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["application/pdf", "image/png", "image/jpeg"].includes(file.type)) { setError("Solo PDF, PNG o JPG."); return; }
+    if (file.size > 25 * 1024 * 1024) { setError("El archivo supera 25 MB."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const path = `${employeeId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
+      const { error: upErr } = await supabase.storage.from("people-documents").upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { data, error: dbErr } = await supabase.from("people_documents").insert({ employee_id: employeeId, kind, name: file.name, path, size: file.size }).select().single();
+      if (dbErr) throw dbErr;
+      patchLocal((d) => ({ documents: [...d.documents, data] }));
+    } catch (err) {
+      setError(err.message || "No se pudo subir el archivo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (doc) => {
+    if (!window.confirm(`¿Eliminar "${doc.name}"?`)) return;
+    setError(null);
+    const { error: stErr } = await supabase.storage.from("people-documents").remove([doc.path]);
+    if (stErr) { setError(stErr.message); return; }
+    const { error: dbErr } = await supabase.from("people_documents").delete().eq("id", doc.id);
+    if (dbErr) { setError(dbErr.message); return; }
+    patchLocal((d) => ({ documents: d.documents.filter((x) => x.id !== doc.id) }));
+  };
+
+  return (
+    <div>
+      <ul className="people-docs">
+        {documents.map((doc) => (
+          <li key={doc.id}>
+            <span className={`people-doc-kind is-${doc.kind === "Stock options" ? "stock" : doc.kind === "Contrato Deel" ? "deel" : "other"}`}>{doc.kind}</span>
+            <button className="people-doc-name" onClick={() => open(doc)} title="Abrir (enlace privado de 5 minutos)">{doc.name}</button>
+            <span className="people-muted">{doc.size ? fileSize(doc.size) : ""}</span>
+            <button className="admin-link-button is-danger" onClick={() => remove(doc)}>Eliminar</button>
+          </li>
+        ))}
+        {!documents.length && <li className="people-muted">Sin documentos.</li>}
+      </ul>
+      <div className="people-inline-form">
+        <label className="admin-field"><span>Tipo</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>{DOC_KINDS.map((k) => <option key={k}>{k}</option>)}</select>
+        </label>
+        <input ref={inputRef} type="file" className="sr-only" accept=".pdf,.png,.jpg,.jpeg" onChange={upload} />
+        <button className="people-secondary-button" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? "Subiendo…" : "+ Adjuntar documento"}</button>
+      </div>
+      {error && <div className="board-doc-error" role="alert">{error}</div>}
+    </div>
+  );
 }
 
 /** Status of a stock option grant from its dates (the schedule file does not define partial vesting). */
@@ -140,7 +224,8 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
   );
 }
 
-function PersonModal({ employee, privateData, grants, lines, periods, editable, patchLocal, onClose, isNew }) {
+function PersonModal({ employee, privateData, grants, documents, photos, lines, periods, editable, patchLocal, onClose, isNew }) {
+  const photoRef = useRef(null);
   const [editing, setEditing] = useState(Boolean(isNew));
   const [form, setForm] = useState({ ...employee });
   const [priv, setPriv] = useState({ ...(privateData || {}) });
@@ -193,6 +278,22 @@ function PersonModal({ employee, privateData, grants, lines, periods, editable, 
     }
   };
 
+  const changePhoto = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) { setError("La foto debe ser PNG, JPG o WEBP de hasta 5 MB."); return; }
+    setError(null);
+    const path = `${employee.id}/${crypto.randomUUID()}.${file.type.split("/")[1]}`;
+    const { error: upErr } = await supabase.storage.from("people-photos").upload(path, file, { contentType: file.type, upsert: false });
+    if (upErr) { setError(upErr.message); return; }
+    const { data, error: err } = await supabase.from("people_employees").update({ photo_path: path }).eq("id", employee.id).select().single();
+    if (err) { setError(err.message); return; }
+    if (employee.photo_path) await supabase.storage.from("people-photos").remove([employee.photo_path]);
+    const { data: signed } = await supabase.storage.from("people-photos").createSignedUrl(path, 3600);
+    patchLocal((d) => ({ employees: d.employees.map((e) => (e.id === data.id ? data : e)), photos: { ...d.photos, [data.id]: signed?.signedUrl } }));
+  };
+
   const toggleActive = async () => {
     const next = !employee.active;
     if (!window.confirm(next ? `¿Marcar a ${employee.name} como activa? Entrará en el próximo borrador de nómina.` : `¿Marcar a ${employee.name} como inactiva? No entrará en las próximas nóminas.`)) return;
@@ -206,7 +307,13 @@ function PersonModal({ employee, privateData, grants, lines, periods, editable, 
     <div className="people-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="people-modal is-wide" role="dialog" aria-label={`Ficha de ${employee.name || "nueva persona"}`}>
         <div className="people-person-header">
-          <span className="people-avatar is-large" style={{ background: areaColor(form.area) }}>{initials(form.name || "?")}</span>
+          <div className="people-photo-wrap">
+            <PersonAvatar employee={isNew ? form : employee} photos={photos} size="large" />
+            {editable && !isNew && <>
+              <input ref={photoRef} type="file" className="sr-only" accept="image/png,image/jpeg,image/webp" onChange={changePhoto} />
+              <button className="people-photo-button" onClick={() => photoRef.current?.click()}>Cambiar foto</button>
+            </>}
+          </div>
           <div>
             <h2>{isNew ? "Nueva persona" : employee.name}</h2>
             {!isNew && <div className="people-muted">{employee.role_title || "Sin cargo"} · {employee.area || "Sin área"} · {tenure(employee.start_date, employee.end_date)}</div>}
@@ -238,6 +345,12 @@ function PersonModal({ employee, privateData, grants, lines, periods, editable, 
 
         {!isNew && (
           <>
+            <section className="people-person-section">
+              <h3>Documentos <span className="people-muted">· solo editores de People</span></h3>
+              {editable
+                ? <DocumentsSection employeeId={employee.id} documents={documents} patchLocal={patchLocal} />
+                : <p className="admin-note">Tu acceso a People es de solo lectura; los contratos no se muestran.</p>}
+            </section>
             <section className="people-person-section">
               <h3>Stock options</h3>
               <GrantsEditor employeeId={employee.id} grants={grants} editable={editable} patchLocal={patchLocal} />
@@ -275,7 +388,7 @@ function PersonModal({ employee, privateData, grants, lines, periods, editable, 
   );
 }
 
-export default function DirectoryView({ employees, privates, grants, lines, periods, editable, patchLocal }) {
+export default function DirectoryView({ employees, privates, grants, documents, photos, lines, periods, editable, patchLocal }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("active");
   const [area, setArea] = useState("");
@@ -336,7 +449,7 @@ export default function DirectoryView({ employees, privates, grants, lines, peri
               <tr key={e.id} className="is-clickable" onClick={() => setOpenId(e.id)}>
                 <td>
                   <div className="people-directory-person">
-                    <span className="people-avatar" style={{ background: areaColor(e.area) }}>{initials(e.name)}</span>
+                    <PersonAvatar employee={e} photos={photos} />
                     <div><div className="people-person">{e.name}</div><div className="people-muted">{e.role_title || "—"}</div></div>
                   </div>
                 </td>
@@ -356,11 +469,11 @@ export default function DirectoryView({ employees, privates, grants, lines, peri
 
       {open && (
         <PersonModal key={open.id} employee={open} privateData={privates.find((p) => p.employee_id === open.id)}
-          grants={grants.filter((g) => g.employee_id === open.id)} lines={lines} periods={periods}
+          grants={grants.filter((g) => g.employee_id === open.id)} documents={documents.filter((d) => d.employee_id === open.id)} photos={photos} lines={lines} periods={periods}
           editable={editable} patchLocal={patchLocal} onClose={() => setOpenId(null)} />
       )}
       {creating && (
-        <PersonModal isNew employee={{ name: "", cost_type: "OPEX", allowance: 60, active: true }} privateData={null} grants={[]} lines={[]} periods={periods}
+        <PersonModal isNew employee={{ name: "", cost_type: "OPEX", allowance: 60, active: true }} privateData={null} grants={[]} documents={[]} photos={photos} lines={[]} periods={periods}
           editable={editable} patchLocal={patchLocal} onClose={() => setCreating(false)} />
       )}
     </div>

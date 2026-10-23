@@ -1312,3 +1312,12 @@
 .user-menu-item span { width: 16px; color: #2a5af4; text-align: center; }
 .user-menu-item:hover { background: #f4f7fc; }
 .user-menu-item.is-danger, .user-menu-item.is-danger span { color: #c62f37; }
+
+.admin-notice {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #0f7a5c;
+  background: #e7f6f0;
+  font-size: 13px;
+}
