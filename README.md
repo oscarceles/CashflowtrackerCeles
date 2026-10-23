@@ -23,10 +23,14 @@ src/Auth.jsx          → pantalla de login (magic link o contraseña) y verific
 src/main.jsx          → punto de entrada de React
 src/People.jsx        → módulo People (reportes, payroll mensual, cálculo de nómina, retiros, archivo Deel)
 src/PeopleDirectory.jsx → directorio de personas (fichas, datos sensibles, stock options)
+src/Consolidation.jsx → herramienta de consolidación mensual (Board → Consolidated Data → Financials)
+src/consolidationEngine.js → cálculos de la consolidación (conversión, CTA, eliminaciones, validaciones)
+src/BoardEntities.jsx → documentos de cada entidad local
+src/PdfReader.jsx     → lector PDF integrado (PDF.js)
 src/peopleUtils.js    → cálculos compartidos de People (totales, prima, liquidación, Deel)
 src/cashflow.css      → estilos con la identidad visual de Celes
 supabase/schema.sql   → SQL para crear las tablas app_state / allowed_users y sus políticas RLS
-supabase/board.sql    → cap table de Board (RLS por acceso a Board, fecha de última actualización)
+supabase/board.sql    → Board: cap table, documentos de entidades locales y consolidación (RLS por acceso a Board)
 supabase/people.sql   → tablas, reglas y cierre de nómina del módulo People (los datos salariales no van al repo)
 supabase/security-hardening.sql → roles de miembros, RLS por rol/módulo + hook que bloquea registros fuera de la lista (correr después de schema.sql)
 netlify.toml          → build, funciones y headers de seguridad (CSP, HSTS, anti-iframe)

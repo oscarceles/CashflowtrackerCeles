@@ -1,0 +1,169 @@
+/* ---------- Board · Local entities documents ---------- */
+.entity-doc-list { display: flex; flex-direction: column; gap: 4px; max-height: 760px; overflow-y: auto; }
+.entity-doc-category { margin-top: 8px; }
+.entity-doc-category-title {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  color: #647084;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.entity-doc-category-title span { color: #8a94a5; font-weight: 600; }
+.entity-doc-folder {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  color: #40516a;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.entity-doc-folder:hover { background: #f4f7fc; }
+.entity-doc-folder span { margin-left: auto; color: #8a94a5; font-weight: 500; }
+.entity-doc-item { display: flex; align-items: center; border-radius: 5px; }
+.entity-doc-item.is-nested { margin-left: 14px; }
+.entity-doc-item > button:first-child {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  color: #0f172a;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.entity-doc-item:hover { background: #f4f7fc; }
+.entity-doc-item.is-active { background: #eef3ff; }
+.entity-doc-item.is-active .entity-doc-name { color: #1746d1; font-weight: 600; }
+.entity-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entity-doc-kind { flex: none; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+.entity-doc-kind.is-pdf { color: #b42318; background: #fdecea; }
+.entity-doc-kind.is-xls { color: #0f7a5c; background: #e7f6f0; }
+.entity-doc-kind.is-img, .entity-doc-kind.is-doc { color: #1746d1; background: #eef3ff; }
+.entity-doc-remove { padding: 2px 8px; border: 0; color: #c62f37; background: transparent; font-size: 15px; cursor: pointer; opacity: 0; }
+.entity-doc-item:hover .entity-doc-remove { opacity: 1; }
+.entity-doc-empty { padding: 10px 8px; font-size: 12px; }
+.entity-doc-upload { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef1f5; }
+.entity-doc-upload select, .entity-doc-upload input { padding: 7px 9px; border: 1px solid #dce3ed; border-radius: 6px; font: inherit; font-size: 12px; }
+.entity-doc-image { display: flex; justify-content: center; padding: 16px; }
+.entity-doc-image img { max-width: 100%; max-height: 720px; border-radius: 6px; }
+
+/* ---------- Board · Consolidation (Financials) ---------- */
+.cons-period { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.cons-period select, .cons-card-actions select {
+  padding: 8px 10px;
+  border: 1px solid #dce3ed;
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+.cons-period .people-status { align-self: center; margin: 0; }
+
+.cons-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; padding: 4px; border-radius: 8px; background: #f1f4f8; }
+.cons-tabs button { padding: 8px 14px; border: 0; border-radius: 6px; color: #40516a; background: transparent; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cons-tabs button.is-active { color: #0f172a; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+
+.cons-card { margin-bottom: 14px; padding: 16px 18px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.cons-card h3 { margin: 0 0 10px; color: #0f172a; font-size: 14px; font-weight: 650; }
+.cons-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.cons-card-head h3 { margin: 0; }
+.cons-card-actions { display: flex; align-items: center; gap: 10px; }
+
+.cons-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.cons-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.cons-tile span { color: #647084; font-size: 11px; font-weight: 650; }
+.cons-tile b { color: #0f172a; font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cons-tile small { color: #647084; font-size: 11px; }
+.cons-tile small.is-up { color: #0f7a5c; }
+.cons-tile small.is-down { color: #b42318; }
+
+.cons-checklist { margin: 0 0 10px; padding: 0; list-style: none; }
+.cons-checklist li { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f0f2f6; font-size: 13px; }
+.cons-checklist li span { width: 16px; font-weight: 700; text-align: center; }
+.cons-checklist li.is-ok span { color: #0f7a5c; }
+.cons-checklist li.is-pending { color: #40516a; }
+.cons-checklist li.is-pending span { color: #b45309; }
+.cons-steps { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.cons-warning { margin: 8px 0; padding: 9px 12px; border-radius: 6px; color: #92400e; background: #fef3c7; font-size: 12.5px; }
+
+.cons-table .num, .cons-form .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cons-table th small { display: block; color: #8a94a5; font-size: 9.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.cons-statement td { padding: 7px 12px; white-space: nowrap; }
+.cons-statement th { white-space: nowrap; }
+.cons-statement .is-total { background: #f5f8ff; font-weight: 650; }
+.cons-row-section td { padding-top: 14px; color: #647084; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.cons-row-total td { border-top: 1px solid #dce3ed; font-weight: 650; }
+.cons-row-grand td { border-top: 2px solid #0f172a; color: #0f172a; font-weight: 700; }
+.cons-monthly th.is-history { color: #8a94a5; }
+.cons-monthly td { font-size: 12px; }
+
+.cons-entity-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cons-entity-picker button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cons-entity-picker button b { color: #0f172a; font-size: 13px; }
+.cons-entity-picker button span { color: #647084; font-size: 11.5px; }
+.cons-entity-picker button.is-active { border-color: #2a5af4; background: #f5f8ff; box-shadow: inset 0 0 0 1px #2a5af4; }
+
+.cons-entity-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.cons-entity-head h3 { margin: 0 0 2px; color: #0f172a; font-size: 16px; }
+.cons-entity-status { display: flex; align-items: center; gap: 10px; }
+.cons-entity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; align-items: start; }
+
+.cons-form { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cons-form th { padding: 6px 6px; color: #647084; font-size: 10px; font-weight: 700; text-align: right; text-transform: uppercase; }
+.cons-form td { padding: 4px 6px; border-bottom: 1px solid #f3f5f8; color: #0f172a; }
+.cons-form td small { color: #8a94a5; }
+.cons-form-section td { padding-top: 12px; color: #647084; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; border-bottom: 0; }
+.cons-form tr.is-derived td { color: #40516a; font-style: italic; }
+.cons-form tfoot td { padding: 7px 6px; border-top: 1px solid #dce3ed; font-weight: 650; }
+.cons-form tfoot tr.is-good td:last-child { color: #0f7a5c; }
+.cons-form tfoot tr.is-bad td { color: #b42318; }
+
+.cons-amount {
+  width: 140px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #0f172a;
+  background: #f6f8fc;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cons-amount:hover:not(:disabled) { border-color: #dce3ed; }
+.cons-amount:focus { border-color: #2a5af4; outline: none; background: #fff; box-shadow: 0 0 0 3px #e3eaff; }
+.cons-amount:disabled { background: transparent; }
+.cons-docs { margin-top: 18px; }
+
+@media (max-width: 1100px) {
+  .cons-entity-grid { grid-template-columns: minmax(0, 1fr); }
+}
