@@ -24,7 +24,10 @@ export const BS_LINES = [
   { key: "cash", label: "Efectivo y equivalentes", section: "current_assets" },
   { key: "receivables", label: "Cuentas por cobrar", section: "current_assets" },
   { key: "tax_assets", label: "Impuestos a favor y anticipos", section: "current_assets" },
+  { key: "other_current_assets", label: "Otros activos corrientes", section: "current_assets" },
+  { key: "fixed_assets", label: "Propiedad, planta y equipo, neto", section: "noncurrent_assets" },
   { key: "intangibles", label: "Intangibles", section: "noncurrent_assets" },
+  { key: "other_noncurrent_assets", label: "Otros activos no corrientes", section: "noncurrent_assets" },
   { key: "payables", label: "Cuentas por pagar y gastos acumulados", section: "current_liabilities" },
   { key: "tax_liabilities", label: "Impuestos por pagar", section: "current_liabilities" },
   { key: "other_current_liabilities", label: "Otros pasivos corrientes", section: "current_liabilities" },
@@ -230,6 +233,61 @@ export function buildModel({ periods, entries, entities }) {
   }
 
   return { periodById, entry, history, included, rate, entityMonth, consolidatedMonth, ytdNetUsd, entityBalance, consolidatedBalance, checklist };
+}
+
+/**
+ * "Adjusted" view of a model: revenue mensualized. Each month's consolidated revenue (USD, after eliminations)
+ * becomes the average of the year: revenue of the months of that year with figures ÷ number of those months.
+ * Everything else stays as reported, so the difference only moves net income. The year's total is unchanged
+ * (the last month with figures closes the year-to-date difference to zero); on the balance sheet the
+ * accumulated difference is shown as accrued revenue (other current assets) when the average recognizes more
+ * than reported, or deferred revenue (other current liabilities) when it recognizes less, so it still squares.
+ * It recalculates whenever a month of the year is loaded or changed.
+ */
+export function buildAdjusted(model) {
+  const months = Object.keys(model.periodById).sort();
+  const years = {};
+  for (const id of months) {
+    const m = model.consolidatedMonth(id);
+    if (!m) continue;
+    const y = (years[id.slice(0, 4)] ||= { total: 0, months: [] });
+    y.total += num(m.lines.revenue);
+    y.months.push(id);
+  }
+  const adjustments = {};
+  for (const y of Object.values(years)) {
+    y.average = round2(y.total / y.months.length);
+    let sum = 0;
+    y.months.forEach((id, i) => {
+      // The last month takes the rounding so the year's total stays exactly as reported.
+      adjustments[id] = i === y.months.length - 1 ? round2(-sum) : round2(y.average - num(model.consolidatedMonth(id).lines.revenue));
+      sum += adjustments[id];
+    });
+  }
+  /** Adjusted − reported revenue of a month (USD). */
+  const adjustment = (pid) => adjustments[pid] || 0;
+  const ytdAdjustment = (pid) => round2((years[pid.slice(0, 4)]?.months || []).filter((id) => id <= pid).reduce((s, id) => s + adjustment(id), 0));
+
+  function consolidatedMonth(pid) {
+    const m = model.consolidatedMonth(pid);
+    if (!m) return null;
+    const adj = adjustment(pid);
+    const lines = { ...m.lines, revenue: round2(num(m.lines.revenue) + adj) };
+    return { ...m, lines, net: round2(sumPl(lines)), reportedRevenue: m.lines.revenue, adjustment: adj };
+  }
+
+  function consolidatedBalance(pid) {
+    const b = model.consolidatedBalance(pid);
+    if (!b) return null;
+    const d = ytdAdjustment(pid);
+    const col = Object.fromEntries(BS_LINES.map((l) => [l.key, 0]));
+    col.net_income = d;
+    if (d >= 0) col.other_current_assets = d; else col.other_current_liabilities = -d;
+    const total = Object.fromEntries(BS_LINES.map((l) => [l.key, round2(num(b.total[l.key]) + col[l.key])]));
+    return { ...b, columns: { ...b.columns, revenue_adjustment: col }, total, totals: bsTotals(total), adjustment: d };
+  }
+
+  return { ...model, adjusted: true, years, adjustment, ytdAdjustment, consolidatedMonth, consolidatedBalance };
 }
 
 /** Parses amounts typed or pasted in US (1,234.56) or Latin (1.234,56) format. */

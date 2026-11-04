@@ -250,3 +250,31 @@ create policy "Board editors write draft consolidation entries" on public.consol
 
 revoke all on table public.consolidation_entities, public.consolidation_periods, public.consolidation_entries from anon;
 revoke insert, update, delete on table public.consolidation_entities from authenticated;
+
+-- Account mapping of each entity's ERP chart of accounts to the consolidation lines, remembered across
+-- months. line is a consolidation line key (src/consolidationEngine.js), 'ni_control' or 'ignore';
+-- ic_entity marks intercompany accounts with their counterparty (used for reconciliation and eliminations).
+create table if not exists public.consolidation_account_maps (
+  entity_id text not null references public.consolidation_entities (id) on delete cascade,
+  code text not null check (length(code) between 1 and 200),
+  name text,
+  line text not null check (line ~ '^[a-z_]{2,40}$'),
+  ic_entity text references public.consolidation_entities (id) on delete set null,
+  updated_at timestamptz not null default now(),
+  updated_by text,
+  primary key (entity_id, code)
+);
+
+drop trigger if exists consolidation_account_maps_touch on public.consolidation_account_maps;
+create trigger consolidation_account_maps_touch before insert or update on public.consolidation_account_maps
+  for each row execute function public.board_cap_table_touch_row();
+
+alter table public.consolidation_account_maps enable row level security;
+drop policy if exists "Board viewers read account maps" on public.consolidation_account_maps;
+drop policy if exists "Board editors write account maps" on public.consolidation_account_maps;
+create policy "Board viewers read account maps" on public.consolidation_account_maps for select to authenticated
+  using (public.module_access('board') is not null);
+create policy "Board editors write account maps" on public.consolidation_account_maps for all to authenticated
+  using (public.module_access('board') = 'edit')
+  with check (public.module_access('board') = 'edit');
+revoke all on table public.consolidation_account_maps from anon;
