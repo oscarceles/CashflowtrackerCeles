@@ -23,6 +23,16 @@ async function callErp(payload) {
 
 const decodeBase64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
 
+/** Sheets of each file the ERP returned: an Excel report (Siigo) or report rows already laid out (QuickBooks). */
+async function readFetchedFiles(files, periodId) {
+  const parsed = [];
+  for (const f of files) {
+    const sheets = f.sheets || await readSpreadsheet({ name: f.fileName, arrayBuffer: async () => decodeBase64(f.contentBase64) });
+    parsed.push(parseErpExport(sheets, f.fileName, { periodId }));
+  }
+  return parsed;
+}
+
 /** Leaf accounts whose balance differs between the ERP report and the import already loaded for the month. */
 function compareImports(fetched, loaded) {
   if (!loaded) return null;
@@ -37,7 +47,7 @@ function compareImports(fetched, loaded) {
   return { rows: rows.sort((p, q) => Math.abs(q.diff) - Math.abs(p.diff)), file: loaded.file, compared: a.size };
 }
 
-function ConnectionCard({ connection, entity, entities, model, periodId, periodName, maps, editable, member, onSave }) {
+function ConnectionCard({ connection, entity, entities, model, periodId, periodName, maps, editable, member, onSave, onChanged }) {
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [test, setTest] = useState(null);
@@ -56,16 +66,26 @@ function ConnectionCard({ connection, entity, entities, model, periodId, periodN
 
   const testConnection = () => run("test", async () => setTest(await callErp({ action: "test", entityId: entity.id })));
 
-  const fetchTrialBalance = () => run("fetch", async () => {
+  const fetchMonth = () => run("fetch", async () => {
     setApplied(null);
-    const res = await callErp({ action: "trial-balance", entityId: entity.id, periodId });
-    const buffer = decodeBase64(res.contentBase64);
-    const parsed = parseErpExport(await readSpreadsheet({ name: res.fileName, arrayBuffer: async () => buffer }), res.fileName, { periodId });
+    const res = await callErp({ action: "fetch-month", entityId: entity.id, periodId });
+    const parsed = await readFetchedFiles(res.files, periodId);
     const chart = loaded?.chart || defaultChart(entity);
-    const imp = { ...prepareImport([parsed], { periodId, chart, by: member?.email }), source: { provider: res.provider, fetched_at: res.fetchedAt } };
+    const imp = { ...prepareImport(parsed, { periodId, chart, by: member?.email }), source: { provider: res.provider, environment: res.environment || null, fetched_at: res.fetchedAt } };
     const check = applyMapping(imp, maps, { entity, entities, periodYear: +periodId.slice(0, 4) });
     setFetched({ imp, check, meta: res });
   });
+
+  // QuickBooks: the browser goes to Intuit to authorize and comes back to the function's confirmation page.
+  const connect = () => run("connect", async () => { window.location.assign((await callErp({ action: "connect", entityId: entity.id })).url); });
+  const disconnect = () => run("disconnect", async () => {
+    if (!window.confirm(`¿Desconectar ${connection.label} de ${entity.name}? Se revoca la autorización y habrá que volver a conectar.`)) return;
+    await callErp({ action: "disconnect", entityId: entity.id });
+    setTest(null); setFetched(null);
+    await onChanged();
+  });
+  const isSandbox = connection.oauth && (connection.connected?.environment || connection.environment) === "sandbox";
+  const ready = connection.configured && (!connection.oauth || connection.connected);
 
   const useInFinancials = () => run("apply", async () => {
     if (loaded && !window.confirm(`${entity.name} ya tiene una importación en ${periodName} (${loaded.file}). ¿Reemplazarla por la balanza traída de ${connection.label}?`)) return;
@@ -82,13 +102,29 @@ function ConnectionCard({ connection, entity, entities, model, periodId, periodN
     <section className="cons-card cons-erp">
       <div className="cons-card-head">
         <h3>{entity.name} <span className="people-muted">· {connection.label} ({entity.currency})</span></h3>
-        <span className={`people-chip is-${connection.configured ? "good" : "bad"}`}>{connection.configured ? "Credenciales configuradas" : "Sin credenciales"}</span>
+        <span className={`people-chip is-${!connection.configured ? "bad" : ready ? "good" : "wait"}`}>
+          {!connection.configured ? "Sin credenciales" : !ready ? "Sin conectar" : connection.oauth ? `Conectado${isSandbox ? " · sandbox" : ""}` : "Credenciales configuradas"}
+        </span>
       </div>
 
+      {connection.oauth && (
+        <p className="admin-note">
+          {connection.tableMissing ? "Falta la tabla erp_tokens en Supabase (final de supabase/board.sql): sin ella no se puede guardar la conexión. "
+            : connection.connected ? `Empresa ${connection.connected.realmId} (${connection.connected.environment}) · conectada por ${connection.connected.by || "—"} el ${when(connection.connected.at)}${connection.connected.refreshExpiresAt ? ` · la autorización vence el ${when(connection.connected.refreshExpiresAt)} si no se usa` : ""}. `
+              : `Un administrador de ${connection.label} de ${entity.name} debe autorizar la conexión una vez: «Conectar» abre Intuit, se elige la empresa y se acepta. `}
+          {isSandbox && "Ambiente sandbox: trae la compañía de prueba de Intuit, no la contabilidad real, y no se puede usar en Financials."}
+        </p>
+      )}
+
       <div className="cons-import-controls">
-        <button className="people-secondary-button" disabled={!!busy || !connection.configured} onClick={testConnection}>{busy === "test" ? "Probando…" : "Probar conexión"}</button>
-        <button className="admin-primary-button" disabled={!!busy || !connection.configured} onClick={fetchTrialBalance}>{busy === "fetch" ? "Trayendo…" : `Traer balanza de ${periodName}`}</button>
-        {test && <span className="people-muted" role="status">✓ Conectado a {test.provider} · {when(test.testedAt)} · {test.ms} ms</span>}
+        {connection.oauth && (
+          connection.connected
+            ? <button className="admin-link-button" disabled={!!busy} onClick={disconnect}>{busy === "disconnect" ? "Desconectando…" : "Desconectar"}</button>
+            : <button className="admin-primary-button" disabled={!!busy || !connection.configured || connection.tableMissing} onClick={connect}>{busy === "connect" ? "Abriendo Intuit…" : `Conectar ${connection.label}`}</button>
+        )}
+        <button className="people-secondary-button" disabled={!!busy || !ready} onClick={testConnection}>{busy === "test" ? "Probando…" : "Probar conexión"}</button>
+        <button className="admin-primary-button" disabled={!!busy || !ready} onClick={fetchMonth}>{busy === "fetch" ? "Trayendo…" : connection.oauth ? `Traer estados de ${periodName}` : `Traer balanza de ${periodName}`}</button>
+        {test && <span className="people-muted" role="status">✓ Conectado a {test.provider}{test.company ? ` · ${test.company}` : ""} · {when(test.testedAt)} · {test.ms} ms</span>}
       </div>
       {error && <div className="board-doc-error" role="alert">{error}</div>}
 
@@ -98,7 +134,8 @@ function ConnectionCard({ connection, entity, entities, model, periodId, periodN
             <div><span>Empresa</span><b>{fetched.imp.meta?.company || "—"}</b></div>
             <div><span>Período del reporte</span><b className={periodOk ? "" : "is-bad"}>{fetched.imp.meta?.from ? `${fetched.imp.meta.from} → ${fetched.imp.meta.to}` : "no indicado"}</b></div>
             <div><span>Cuentas</span><b>{leaves.length} de detalle · {fetched.imp.accounts.length} total</b></div>
-            <div><span>Débitos − créditos</span><b className={trialOk ? "is-good" : "is-bad"}>{trialOk ? "0 ✓" : fmt(fetched.check.trialDifference)}</b></div>
+            <div><span>{fetched.imp.format === "statement" ? "Activos − (pasivos + patrimonio)" : "Débitos − créditos"}</span><b className={trialOk ? "is-good" : "is-bad"}>{trialOk ? "0 ✓" : fmt(fetched.check.trialDifference)}</b></div>
+            {fetched.imp.format === "statement" && <div><span>Contenido</span><b>{fetched.imp.kind === "both" ? "Balance general + estado de resultados" : fetched.imp.kind}</b></div>}
             <div><span>Resultados</span><b>{fetched.imp.basis === "month" ? "Movimientos del mes" : "Acumulados del año"}</b></div>
             <div><span>Traído</span><b>{when(fetched.meta.fetchedAt)}</b></div>
             <div>
@@ -128,7 +165,7 @@ function ConnectionCard({ connection, entity, entities, model, periodId, periodN
           <div className="cons-import-controls">
             <button className="admin-link-button" onClick={() => setShowAll(!showAll)}>{showAll ? "Ocultar cuentas" : `Ver las ${leaves.length} cuentas del reporte`}</button>
             {editable
-              ? <button className="admin-primary-button" disabled={!!busy || !trialOk} onClick={useInFinancials}>{busy === "apply" ? "Guardando…" : "Usar en Financials"}</button>
+              ? <button className="admin-primary-button" disabled={!!busy || !trialOk || isSandbox} title={isSandbox ? "Los datos de sandbox no se pueden usar en Financials" : undefined} onClick={useInFinancials}>{busy === "apply" ? "Guardando…" : "Usar en Financials"}</button>
               : <span className="people-muted">{periodName} está cerrado o es de solo lectura: no se puede cargar.</span>}
             {applied && <span className="people-muted" role="status">✓ Cargado en {entity.name} · {periodName}. Revisa las asignaciones en Entidades.</span>}
           </div>
@@ -159,14 +196,13 @@ export default function ErpConnectionsTab({ model, periodId, periodName, entitie
   const [connections, setConnections] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    callErp({ action: "status" }).then((r) => setConnections(r.connections)).catch((e) => setError(e.message || String(e)));
-  }, []);
+  const loadStatus = () => callErp({ action: "status" }).then((r) => { setConnections(r.connections); setError(null); }).catch((e) => setError(e.message || String(e)));
+  useEffect(() => { loadStatus(); }, []);
 
   return (
     <div>
       <p className="admin-note">
-        Prueba de conexión directa con el ERP de cada entidad (solo lectura). Trae la balanza de comprobación del mes seleccionado,
+        Prueba de conexión directa con el ERP de cada entidad (solo lectura). Trae la balanza de comprobación (Siigo) o el balance general y el estado de resultados (QuickBooks) del mes seleccionado,
         la compara con la que ya está cargada y, si cuadra, permite usarla en Financials como si se hubiera subido el archivo:
         se aplican las mismas asignaciones de cuentas. Las credenciales del ERP están solo en el servidor.
       </p>
@@ -177,10 +213,10 @@ export default function ErpConnectionsTab({ model, periodId, periodName, entitie
         if (!entity) return null;
         return (
           <ConnectionCard key={c.entityId} connection={c} entity={entity} entities={entities} model={model} periodId={periodId} periodName={periodName}
-            maps={maps[entity.id] || {}} editable={editable} member={member} onSave={onSave} />
+            maps={maps[entity.id] || {}} editable={editable} member={member} onSave={onSave} onChanged={loadStatus} />
         );
       })}
-      <p className="admin-note">Celes Technologies (QuickBooks Online) y Xeles todavía no tienen conexión: se siguen cargando con archivos en Entidades.</p>
+      <p className="admin-note">Xeles todavía no tiene conexión: se sigue cargando con archivos en Entidades.</p>
     </div>
   );
 }

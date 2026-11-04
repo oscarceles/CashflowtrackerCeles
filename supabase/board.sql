@@ -278,3 +278,22 @@ create policy "Board editors write account maps" on public.consolidation_account
   using (public.module_access('board') = 'edit')
   with check (public.module_access('board') = 'edit');
 revoke all on table public.consolidation_account_maps from anon;
+
+-- OAuth tokens of the ERP connections (QuickBooks Online). Only the erp-connections Netlify function reads
+-- or writes them with the service role: RLS is on with no policies, so no browser session can see a token.
+create table if not exists public.erp_tokens (
+  entity_id text primary key references public.consolidation_entities (id) on delete cascade,
+  provider text not null check (provider in ('qbo')),
+  environment text not null check (environment in ('sandbox', 'production')),
+  realm_id text not null,
+  access_token text not null,
+  access_expires_at timestamptz not null,
+  refresh_token text not null,
+  refresh_expires_at timestamptz,
+  connected_by text,
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.erp_tokens enable row level security;
+revoke all on table public.erp_tokens from anon, authenticated;
