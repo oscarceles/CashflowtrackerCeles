@@ -324,6 +324,7 @@ const qboCallback = async (event, db) => {
       environment: qboConfig().environment, realm_id: String(q.realmId), connected_by: state.email, connected_at: new Date().toISOString(),
     }));
   } catch (e) {
+    console.error(`[erp-connections] qbo callback ${state.entityId}: ${e instanceof ErpError ? e.message : e?.stack || e}`);
     return htmlPage(502, "No se pudo conectar QuickBooks", escapeHtml(e instanceof ErpError ? e.message : "Error al guardar la conexión."), origin);
   }
   return htmlPage(200, "QuickBooks conectado", `La empresa ${escapeHtml(q.realmId)} quedó conectada (${qboConfig().environment}).`, origin);
@@ -338,7 +339,10 @@ exports.handler = async (event) => {
 
   if (event.httpMethod === "GET") {
     if ((event.queryStringParameters || {}).state && qboConfigured()) {
-      try { return await qboCallback(event, db); } catch { return htmlPage(502, "No se pudo conectar QuickBooks", "El servicio no está disponible.", requestOrigin(event)); }
+      try { return await qboCallback(event, db); } catch (e) {
+        console.error(`[erp-connections] qbo callback: ${e?.stack || e}`);
+        return htmlPage(502, "No se pudo conectar QuickBooks", "El servicio no está disponible.", requestOrigin(event));
+      }
     }
     return jsonResponse(405, { error: "Method not allowed" });
   }
@@ -347,6 +351,7 @@ exports.handler = async (event) => {
   const authorization = event.headers.authorization || event.headers.Authorization || "";
   if (!authorization.toLowerCase().startsWith("bearer ")) return jsonResponse(401, { error: "Sign-in required" });
 
+  let body = {};
   try {
     const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { apikey: anonKey, Authorization: authorization } });
     if (!userResponse.ok) return jsonResponse(401, { error: "Session is invalid or expired" });
@@ -356,7 +361,7 @@ exports.handler = async (event) => {
     // Pulling the books straight from an ERP is part of preparing the consolidation: Board edit access only.
     if (moduleAccess(await db.member(email), "board") !== "edit") return jsonResponse(403, { error: "Se necesita acceso de edición a Board para usar las conexiones ERP." });
 
-    const body = readBody(event);
+    body = readBody(event);
     const action = body.action;
 
     if (action === "status") {
@@ -425,6 +430,8 @@ exports.handler = async (event) => {
 
     return jsonResponse(400, { error: "Unknown ERP action" });
   } catch (e) {
+    // Errors go to the Netlify function log (messages carry Intuit's intuit_tid, never tokens or credentials).
+    console.error(`[erp-connections] ${body?.action || event.httpMethod} ${body?.entityId || ""}: ${e instanceof ErpError ? `${e.status} ${e.message}` : e?.stack || e}`);
     if (e instanceof ErpError) return jsonResponse(e.status, { error: e.message });
     return jsonResponse(502, { error: "El servicio de conexiones ERP no está disponible." });
   }

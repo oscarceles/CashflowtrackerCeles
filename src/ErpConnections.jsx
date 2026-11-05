@@ -217,6 +217,9 @@ export default function ErpConnectionsTab({ model, periodId, periodName, entitie
         );
       })}
       <p className="admin-note">Xeles todavía no tiene conexión: se sigue cargando con archivos en Entidades.</p>
+      <p className="admin-note">
+        Soporte de las conexiones ERP: <a href="mailto:admin@celes.ai">admin@celes.ai</a>. Incluye el mensaje de error completo (con el intuit_tid si aparece).
+      </p>
     </div>
   );
 }
