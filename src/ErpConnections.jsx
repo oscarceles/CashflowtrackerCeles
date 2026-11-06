@@ -33,6 +33,24 @@ async function readFetchedFiles(files, periodId) {
   return parsed;
 }
 
+// The QuickBooks API names report groups with other capitalization than its Excel export and ends them with ":"
+// ("Non-current liabilities:" vs "Non-current Liabilities"). Codes that only differ in that are the same account.
+const codeKey = (code) => String(code || "").toLowerCase().replace(/[’`]/g, "'").replace(/:(?=\s*(›|$))/g, "").replace(/\s+/g, " ").trim();
+
+/** Renames fetched account codes (and groups) to the codes already known for the entity, so comparison and saved mappings line up. */
+function alignCodes(imp, knownCodes, knownGroups) {
+  const index = (list) => { const m = new Map(); for (const c of list) if (c && !m.has(codeKey(c))) m.set(codeKey(c), c); return m; };
+  const codes = index(knownCodes), groups = index(knownGroups);
+  return {
+    ...imp,
+    accounts: imp.accounts.map((a) => ({
+      ...a,
+      code: codes.get(codeKey(a.code)) || a.code,
+      ...(a.group ? { group: groups.get(codeKey(a.group)) || a.group } : {}),
+    })),
+  };
+}
+
 /** Leaf accounts whose balance differs between the ERP report and the import already loaded for the month. */
 function compareImports(fetched, loaded) {
   if (!loaded) return null;
@@ -71,7 +89,11 @@ function ConnectionCard({ connection, entity, entities, model, periodId, periodN
     const res = await callErp({ action: "fetch-month", entityId: entity.id, periodId });
     const parsed = await readFetchedFiles(res.files, periodId);
     const chart = loaded?.chart || defaultChart(entity);
-    const imp = { ...prepareImport(parsed, { periodId, chart, by: member?.email }), source: { provider: res.provider, environment: res.environment || null, fetched_at: res.fetchedAt } };
+    const known = [...(loaded?.accounts || []).map((a) => a.code), ...Object.keys(maps)];
+    const imp = {
+      ...alignCodes(prepareImport(parsed, { periodId, chart, by: member?.email }), known, (loaded?.accounts || []).map((a) => a.group)),
+      source: { provider: res.provider, environment: res.environment || null, fetched_at: res.fetchedAt },
+    };
     const check = applyMapping(imp, maps, { entity, entities, periodYear: +periodId.slice(0, 4) });
     setFetched({ imp, check, meta: res });
   });
