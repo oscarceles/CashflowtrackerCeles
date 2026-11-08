@@ -24,7 +24,9 @@ const pct = (a, b) => (b ? ((a - b) / Math.abs(b)) * 100 : null);
 // Typical local-currency-per-USD ranges used to spot inverted or mistyped rates.
 const FX_RANGES = { COP: [2500, 6000], MXN: [12, 30], CLP: [600, 1300] };
 const SUSPENSE = /suspens|transitori|por clasificar|por identificar|uncategorized|ask my accountant|opening balance equity|partidas pendientes|cuenta puente|sin identificar/;
-const CONTRA_REVENUE = /devoluc|descuento|rebaja|bonificac|return|discount|refund/;
+const CONTRA_REVENUE = /devoluc|descuento|rebaja|bonificac|return|discount|refund|diferid|deferr|unearned/;
+// Accounts whose normal balance is opposite to their line: subscribed capital not yet paid, deductible VAT inside VAT payable.
+const CONTRA_BS = /deprecia|amortiza|deterioro|estimacion|allowance|provision|por suscribir|suscrito no pagado|descontable|a favor/;
 const acct = (a) => (a.code === a.name ? a.name : `${a.code} ${a.name}`);
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -76,15 +78,16 @@ export function suggestEliminations({ model, entities, resolve, periodId }) {
         const amount = round2(row.amount / closeRate);
         bs[row.line] -= amount;
         items.push({ entity: ent, row, kind: "bs", amount });
-        if (pairKey) { pairs[pairKey] ||= { bsAssets: 0, bsCredit: 0, pl: 0, plExact: true, entities: pairKey.split("|") }; pairs[pairKey][isAssetLine(row.line) ? "bsAssets" : "bsCredit"] += amount; }
+        if (pairKey) { pairs[pairKey] ||= { bsAssets: 0, bsCredit: 0, pl: 0, entities: pairKey.split("|") }; pairs[pairKey][isAssetLine(row.line) ? "bsAssets" : "bsCredit"] += amount; }
       } else if (isPlLine(row.line)) {
         if (!avgRate) continue;
         const m = accountMonth(resolve, periodId, ent.id, row);
-        if (!m.exact) notes.push(`${ent.name}: falta la balanza del mes anterior; las eliminaciones de resultados usan el acumulado del año.`);
+        if (!m.exact) { notes.push(ent.name); continue; } // YTD includes earlier months: not suggested
         const effect = round2(profitEffect(row.line, m.value) / avgRate);
+        if (!effect) continue; // no intercompany movement this month
         pl[row.line] -= effect;
         items.push({ entity: ent, row, kind: "pl", amount: effect });
-        if (pairKey) { pairs[pairKey] ||= { bsAssets: 0, bsCredit: 0, pl: 0, plExact: true, entities: pairKey.split("|") }; pairs[pairKey].pl += effect; if (!m.exact) pairs[pairKey].plExact = false; }
+        if (pairKey) { pairs[pairKey] ||= { bsAssets: 0, bsCredit: 0, pl: 0, entities: pairKey.split("|") }; pairs[pairKey].pl += effect; }
       }
     }
   }
@@ -157,19 +160,23 @@ export function analysePeriod({ model, entities, maps, periodId }) {
       if (unknownIc.length) add({ severity: "warning", scope, title: "Cuentas intercompañía sin contraparte", detail: unknownIc.slice(0, 4).map(acct).join("; "), fix: "Indica con qué entidad del grupo es cada cuenta para poder conciliarla y eliminarla.", actions: [goto("Asignar contraparte")] });
 
       // Balances on the unexpected side.
+      const prevRows = resolve(prevId, ent.id)?.rows || [];
+      const unchanged = (a) => prevRows.some((x) => x.code === a.code && Math.abs(x.amount - a.amount) < 0.01);
       const odd = [];
       for (const a of leaves) {
         if (!a.line || a.line === "ignore" || Math.abs(a.amount) < materialLocal || a.amount >= 0) continue;
         const name = norm(a.name);
-        if (a.line === "cash") odd.push({ a, why: "Efectivo con saldo crédito (sobregiro)", fix: "Si es un sobregiro, reclasifícalo a otros pasivos corrientes.", to: "other_current_liabilities" });
+        if (a.line === "cash") odd.push(unchanged(a)
+          ? { a, why: "Cuenta de efectivo con saldo crédito y sin movimiento", note: ` Mismo saldo que en ${periodLabel(prevId)}.`, fix: "Un banco congelado en negativo no suele ser un sobregiro: puede ser una cuenta antigua o duplicada tras un cambio de cuenta bancaria, o transferencias registradas de un solo lado. Concíliala con el extracto y corrígela en el ERP; reclasifícala a pasivo solo si el banco confirma el sobregiro.", to: "other_current_liabilities" }
+          : { a, why: "Efectivo con saldo crédito (sobregiro)", fix: "Confirma con el extracto: si es un sobregiro, reclasifícalo a otros pasivos corrientes; si no, revisa transferencias o pagos registrados en la cuenta equivocada.", to: "other_current_liabilities" });
         else if (a.line === "receivables") odd.push({ a, why: "Cuenta por cobrar con saldo crédito (anticipos o pagos sin aplicar)", fix: "Aplica los pagos a sus facturas en el ERP o reclasifica el saldo a otros pasivos corrientes (anticipos de clientes).", to: "other_current_liabilities" });
         else if (a.line === "payables") odd.push({ a, why: "Cuenta por pagar con saldo débito (anticipo a proveedor o pago duplicado)", fix: "Revisa pagos duplicados; si es un anticipo, reclasifícalo a otros activos corrientes.", to: "other_current_assets" });
         else if (a.line === "revenue" && !CONTRA_REVENUE.test(name)) odd.push({ a, why: "Ingreso con saldo débito", fix: "Puede ser una reversión o una factura anulada contabilizada al revés; revisa el auxiliar de la cuenta." });
         else if (["opex", "cost_of_sales"].includes(a.line)) odd.push({ a, why: "Gasto/costo con saldo crédito", fix: "Suele ser una reversión de provisión o un reintegro; si es un ingreso, reclasifícalo a otros ingresos.", to: "other_income" });
-        else if (isBsLine(a.line) && !["retained_earnings", "oci", "fixed_assets", "intangibles"].includes(a.line) && !/deprecia|amortiza|deterioro|estimacion|allowance|provision/.test(name)) odd.push({ a, why: `${lineLabel(a.line)} con saldo contrario a su naturaleza`, fix: "Verifica la asignación de la cuenta o el registro en el ERP." });
+        else if (isBsLine(a.line) && !["retained_earnings", "oci", "fixed_assets", "intangibles"].includes(a.line) && !CONTRA_BS.test(name)) odd.push({ a, why: `${lineLabel(a.line)} con saldo contrario a su naturaleza`, fix: "Verifica la asignación de la cuenta o el registro en el ERP." });
       }
       for (const o of odd.sort((x, y) => Math.abs(y.a.amount) - Math.abs(x.a.amount)).slice(0, 8)) {
-        add({ severity: "warning", scope, title: `${acct(o.a)}: ${o.why}`, detail: `Saldo ${fmt(o.a.amount, 2)} ${ent.currency} en ${lineLabel(o.a.line)}.`, fix: o.fix, actions: [...(o.to ? [{ type: "map", entityId: ent.id, code: o.a.code, name: o.a.name, line: o.to, label: `Mover a ${lineLabel(o.to)}` }] : []), goto("Ver cuenta")] });
+        add({ severity: "warning", scope, title: `${acct(o.a)}: ${o.why}`, detail: `Saldo ${fmt(o.a.amount, 2)} ${ent.currency} en ${lineLabel(o.a.line)}.${o.note || ""}`, fix: o.fix, actions: [...(o.to ? [{ type: "map", entityId: ent.id, code: o.a.code, name: o.a.name, line: o.to, label: `Mover a ${lineLabel(o.to)}` }] : []), goto("Ver cuenta")] });
       }
       for (const a of leaves.filter((x) => SUSPENSE.test(norm(x.name)) && Math.abs(x.balance) >= materialLocal).slice(0, 5)) add({ severity: "warning", scope, title: `Cuenta transitoria con saldo: ${acct(a)}`, detail: `${fmt(a.balance, 2)} ${ent.currency}. Las cuentas puente/por clasificar deberían quedar en cero al cierre.`, fix: "Reclasifica las partidas a su cuenta definitiva en el ERP antes de consolidar.", actions: [goto("Ver cuenta")] });
       for (const pm of (imp.parentMismatches || []).slice(0, 3)) add({ severity: "warning", scope, title: `La cuenta ${pm.code} no coincide con sus subcuentas`, detail: `Saldo de la cuenta ${fmt(pm.balance, 2)} vs suma de subcuentas ${fmt(pm.children, 2)}.`, fix: "Puede faltar una subcuenta en el reporte (filtro de niveles o cuentas sin movimiento): exporta todas las subcuentas.", actions: [goto("Volver a importar")] });
@@ -198,6 +205,7 @@ export function analysePeriod({ model, entities, maps, periodId }) {
     if (bal && Math.abs(bal.localTotals.difference) > 1) add({ severity: "error", scope, title: `El balance no cuadra en ${ent.currency}`, detail: `Activos − (pasivos + patrimonio + resultado del ejercicio) = ${fmt(bal.localTotals.difference, 2)}.`, fix: r ? "Revisa cuentas sin asignar, la cuenta de resultado del ejercicio (si el ERP ya registró el resultado en patrimonio, asígnala como 'control') y que el archivo traiga todas las cuentas." : "Revisa que el resultado del ejercicio no esté incluido también en Resultados acumulados y que los saldos estén en positivo.", actions: [goto()] });
     const month = model.entityMonth(periodId, ent.id);
     if (month && month.local.revenue < -0.5) add({ severity: "warning", scope, title: "Ingresos del mes negativos", detail: `Ingresos acumulados menores que el mes anterior: ${fmt(month.local.revenue, 2)} ${ent.currency} en el mes.`, fix: "Revisa notas crédito/reversiones o si el acumulado del mes anterior se cargó con otro corte.", actions: [goto()] });
+    for (const k of ["cost_of_sales", "opex"]) if (month && month.local[k] > materialLocal) add({ severity: "warning", scope, title: `${k === "opex" ? "Gastos operacionales" : "Costo de ventas"} del mes con saldo a favor`, detail: `El acumulado del año bajó ${fmt(month.local[k], 2)} ${ent.currency} frente al mes anterior: el mes resta ${k === "opex" ? "gastos" : "costos"} en lugar de sumarlos.`, fix: "Suele ser una reversión de provisiones, una reclasificación a otra línea o un acumulado del mes anterior cargado con otro corte. Revisa el auxiliar y que la misma cuenta no esté asignada a líneas distintas entre meses.", actions: [goto("Ver cuentas")] });
     if (month?.warnings?.length) for (const w of month.warnings) add({ severity: "warning", scope, title: w, detail: "", fix: w.startsWith("Falta el acumulado") ? "Carga el mes anterior en la herramienta o escribe su acumulado en la columna 'Acumulado mes anterior'." : "Completa las tasas del mes.", actions: [goto()] });
     if (bal && bal.local.cash < -materialLocal) add({ severity: "error", scope, title: "Efectivo negativo", detail: `${fmt(bal.local.cash, 2)} ${ent.currency}.`, fix: "Un saldo de caja negativo no es posible: revisa sobregiros (reclasificar a pasivo) o movimientos bancarios mal registrados.", actions: [goto()] });
     const prevBal = model.entityBalance(prevId, ent.id);
@@ -225,11 +233,16 @@ export function analysePeriod({ model, entities, maps, periodId }) {
     const dBs = round2(p.bsAssets - p.bsCredit);
     if (Math.abs(dBs) > tol) add({ severity: "error", scope: "Intercompañía", title: `Saldos intercompañía no concilian: ${label}`, detail: `Por cobrar/activos ${usd(p.bsAssets)} vs por pagar/pasivos ${usd(p.bsCredit)} → diferencia ${usd(dBs)}.`, fix: "Causas típicas: una entidad registró una factura o pago que la otra no (corte), tasas de cambio distintas, o una cuenta intercompañía clasificada como tercero. Concilia ambos auxiliares y registra el ajuste en la entidad que falta.", actions: [{ type: "goto", tab: "eliminations", label: "Ver eliminaciones" }] });
     const plTol = Math.max(100, 0.005 * Math.abs(elim.items.filter((i) => i.kind === "pl" && [a, b].includes(i.entity.id)).reduce((s, i) => s + Math.abs(i.amount), 0)));
-    if (Math.abs(p.pl) > plTol) add({ severity: "warning", scope: "Intercompañía", title: `Ingresos y gastos intercompañía no netean: ${label}`, detail: `Efecto neto en la utilidad ${usd(p.pl)} en el mes${p.plExact ? "" : " (calculado con acumulados)"}.`, fix: "La factura intercompañía debe estar como ingreso en una entidad y como costo/gasto en la otra, en el mismo mes y por el mismo valor. Revisa el corte y la tasa usada.", actions: [{ type: "goto", tab: "eliminations", label: "Ver eliminaciones" }] });
+    if (Math.abs(p.pl) > plTol) add({ severity: "warning", scope: "Intercompañía", title: `Ingresos y gastos intercompañía no netean: ${label}`, detail: `Efecto neto en la utilidad ${usd(p.pl)} en el mes.`, fix: "La factura intercompañía debe estar como ingreso en una entidad y como costo/gasto en la otra, en el mismo mes y por el mismo valor. Revisa el corte, la tasa usada y si la contrapartida quedó en una cuenta que no está marcada como intercompañía.", actions: [{ type: "goto", tab: "eliminations", label: "Ver eliminaciones" }] });
   }
   const current = model.entry(periodId, "eliminations")?.values || {};
-  const differs = (a = {}, b = {}) => Object.keys({ ...a, ...b }).some((k) => Math.abs((Number(a[k]) || 0) - (Number(b[k]) || 0)) > 0.5);
-  if (elim.items.length && (differs(current.bs, elim.bs) || differs(current.pl, elim.pl))) add({ severity: Object.keys(current).length ? "info" : "warning", scope: "Intercompañía", title: Object.keys(current).length ? "Las eliminaciones difieren de las sugeridas" : "Hay saldos intercompañía sin eliminar", detail: `${elim.items.length} partidas intercompañía detectadas en las balanzas.`, fix: "Aplica las eliminaciones sugeridas (reversan cada saldo y movimiento intercompañía) y revisa las diferencias de conciliación.", actions: [{ type: "apply-eliminations", label: "Aplicar sugeridas" }, { type: "goto", tab: "eliminations", label: "Ver detalle" }] });
+  const gaps = (a = {}, b = {}, labelOf) => Object.keys({ ...a, ...b }).map((k) => ({ label: labelOf(k), applied: Number(a[k]) || 0, suggested: Number(b[k]) || 0 })).filter((g) => Math.abs(g.applied - g.suggested) > 0.5);
+  const elimGaps = [...gaps(current.bs, elim.bs, lineLabel), ...gaps(current.pl, elim.pl, (k) => PL_LINES.find((l) => l.key === k)?.label || k)].sort((x, y) => Math.abs(y.applied - y.suggested) - Math.abs(x.applied - x.suggested));
+  const hasApplied = Boolean(current.bs || current.pl);
+  if ((elim.items.length || hasApplied) && elimGaps.length) {
+    const top = elimGaps[0];
+    add({ severity: !hasApplied || Math.abs(top.applied - top.suggested) >= 1000 ? "warning" : "info", scope: "Intercompañía", title: hasApplied ? "Las eliminaciones difieren de las sugeridas" : "Hay saldos intercompañía sin eliminar", detail: `${elim.items.length ? `${elim.items.length} partida${elim.items.length === 1 ? "" : "s"} intercompañía del mes en las balanzas.` : "Las balanzas no tienen movimientos intercompañía que eliminar este mes."}${hasApplied ? ` Mayor diferencia: ${top.label}, aplicado ${usd(top.applied)} vs sugerido ${usd(top.suggested)}.` : ""}`, fix: "Aplica las eliminaciones sugeridas (reversan cada saldo y movimiento intercompañía del mes) y revisa las diferencias de conciliación; si mantienes un ajuste manual, documéntalo.", actions: [{ type: "apply-eliminations", label: "Aplicar sugeridas" }, { type: "goto", tab: "eliminations", label: "Ver detalle" }] });
+  }
   const holding = model.included.find((e) => e.is_holding);
   if (holding) {
     const rh = resolve(periodId, holding.id);
@@ -241,7 +254,7 @@ export function analysePeriod({ model, entities, maps, periodId }) {
       if (investment && !capitalIc) add({ severity: "warning", scope: "Intercompañía", title: `Inversión en ${sub.name} sin eliminar contra su capital`, detail: `${holding.name} registra una inversión en ${sub.name}, pero el capital de ${sub.name} no está marcado como intercompañía.`, fix: `En las cuentas de ${sub.name}, marca el capital social como intercompañía con ${holding.name} de contraparte. La diferencia entre inversión y capital convertido se explica normalmente por tipo de cambio (CTA).`, actions: [{ type: "goto", tab: "entities", entityId: sub.id, label: "Marcar capital" }] });
     }
   }
-  for (const n of elim.notes) add({ severity: "info", scope: "Intercompañía", title: n, detail: "", fix: "Importa la balanza del mes anterior para calcular el movimiento exacto del mes.", actions: [] });
+  for (const n of elim.notes) add({ severity: "warning", scope: "Intercompañía", title: `${n}: sin eliminaciones de resultados sugeridas`, detail: `Falta la balanza de ${periodLabel(prevId)}: el saldo de sus cuentas intercompañía de resultados es el acumulado del año e incluye meses anteriores, así que no se sugiere eliminarlo en ${periodLabel(periodId)}.`, fix: `Importa la balanza de ${periodLabel(prevId)} para calcular el movimiento del mes, o ingresa a mano en Eliminaciones solo lo facturado entre entidades en ${periodLabel(periodId)}.`, actions: [{ type: "goto", tab: "eliminations", label: "Ver eliminaciones" }] });
 
   /* ---------- group: variances and consolidated checks ---------- */
   const cur = model.consolidatedMonth(periodId);
@@ -255,7 +268,12 @@ export function analysePeriod({ model, entities, maps, periodId }) {
         ? model.included.map((e) => ({ e, d: (model.entityMonth(periodId, e.id)?.lines[l.key] || 0) - (model.entityMonth(prevId, e.id)?.lines[l.key] || 0) })).filter((x) => Math.abs(x.d) >= 1).sort((x, y) => Math.abs(y.d) - Math.abs(x.d))
         : [];
       const favorable = d > 0; // lines are profit-signed (costs negative): an increase always helps profit
-      add({ severity: "info", scope: "Variaciones", title: `${l.label}: ${favorable ? "favorable" : "desfavorable"} ${usd(Math.abs(d))}${p != null ? ` (${p > 0 ? "+" : ""}${p.toFixed(0)}%)` : ""} vs ${periodLabel(prevId)}`, detail: `${usd(Math.abs(b))} → ${usd(Math.abs(a))}.${drivers.length ? ` Principal impulsor: ${drivers.slice(0, 3).map((x) => `${x.e.name.split(" ")[0]} ${x.d > 0 ? "+" : "−"}${usd(Math.abs(x.d)).replace("−", "")}`).join(", ")}.` : ""}`, fix: "Documenta la causa (nuevo cliente, contratación, gasto puntual, cambio de tasa o error de corte) antes de cerrar.", actions: [] });
+      const shown = (v) => (l.signed ? v : Math.abs(v));
+      const move = shown(a) - shown(b);
+      const movePct = l.signed && (b < 0) !== (a < 0) ? null : pct(shown(a), shown(b));
+      const signedUsd = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${usd(Math.abs(v))}`;
+      const driverMove = (x) => (l.signed || l.sign > 0 ? x.d : -x.d);
+      add({ severity: "info", scope: "Variaciones", title: `${l.label}: ${favorable ? "favorable" : "desfavorable"} ${usd(Math.abs(d))} vs ${periodLabel(prevId)}`, detail: `${usd(shown(b))} → ${usd(shown(a))} (${signedUsd(move)}${movePct != null && Math.abs(movePct) < 1000 ? `, ${movePct > 0 ? "+" : ""}${movePct.toFixed(0)}%` : ""}).${drivers.length ? ` Por entidad: ${drivers.slice(0, 3).map((x) => `${x.e.name.split(" ")[0]} ${signedUsd(driverMove(x))}`).join(", ")}.` : ""}`, fix: "Documenta la causa (nuevo cliente, contratación, gasto puntual, cambio de tasa o error de corte) antes de cerrar.", actions: [] });
     }
     const gm = (x) => (x.lines.revenue ? sumPl(x.lines, PL_SUBTOTALS.gross_profit.keys) / x.lines.revenue : null);
     const g1 = gm(cur), g0 = gm(prv);

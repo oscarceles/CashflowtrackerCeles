@@ -227,3 +227,6 @@
 .kpi-delta { font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .kpi-delta.is-up { color: #0f7a5c; }
 .kpi-delta.is-down { color: #b42318; }
+.kpi-month-link { padding: 0; border: 0; background: none; color: #2a5af4; font: inherit; font-weight: 600; cursor: pointer; }
+.kpi-month-link:hover { text-decoration: underline; }
+.cons-table tr.kpi-selected td { background: #f5f8ff; }
