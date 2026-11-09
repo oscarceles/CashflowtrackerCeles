@@ -13,7 +13,7 @@ export const MODULES = [
 export const ROLES = [
   { id: "super_admin", name: "Super Admin", description: "Puede ver y editar todo, y administrar miembros." },
   { id: "admin", name: "Admin", description: "Ve o edita los módulos que se le asignen." },
-  { id: "colaborador", name: "Colaborador", description: "Solo puede ver los módulos que se le asignen." },
+  { id: "colaborador", name: "Colaborador", description: "Ve o edita los módulos que se le asignen." },
   { id: "board_member", name: "Board Member", description: "Solo puede leer la información de Board." },
 ];
 
@@ -27,7 +27,7 @@ export function moduleAccess(member, module) {
     case "super_admin": return "edit";
     case "board_member": return module === "board" ? "view" : null;
     case "admin": return chosen === "view" || chosen === "edit" ? chosen : null;
-    case "colaborador": return chosen === "view" || chosen === "edit" ? "view" : null;
+    case "colaborador": return chosen === "view" || chosen === "edit" ? chosen : null;
     default: return null;
   }
 }

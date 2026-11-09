@@ -3,7 +3,7 @@
 -- Access model (allowed_users is the member list; nobody outside it gets in):
 --   super_admin  : view + edit every module, and manage members.
 --   admin        : per-module access chosen in `modules` ("view" or "edit").
---   colaborador  : view-only access to the modules listed in `modules`.
+--   colaborador  : per-module access chosen in `modules` ("view" or "edit"), like admin.
 --   board_member : view-only access to Board.
 -- Modules: cashflow, board, people.
 --
@@ -98,7 +98,7 @@ as $$
     when 'super_admin' then 'edit'
     when 'board_member' then case when module = 'board' then 'view' end
     when 'admin' then case when a.modules ->> module in ('view', 'edit') then a.modules ->> module end
-    when 'colaborador' then case when a.modules ->> module in ('view', 'edit') then 'view' end
+    when 'colaborador' then case when a.modules ->> module in ('view', 'edit') then a.modules ->> module end
   end
   from public.allowed_users a
   where a.email = public.current_member_email();

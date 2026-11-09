@@ -14,7 +14,7 @@ function normaliseModules(role, modules) {
   for (const { id } of MODULES) {
     const value = modules?.[id];
     if (value !== "view" && value !== "edit") continue;
-    result[id] = role === "colaborador" ? "view" : value;
+    result[id] = value;
   }
   return result;
 }
@@ -94,20 +94,12 @@ function MemberForm({ initial, isNew, onSave, onCancel, busy }) {
               return (
                 <div key={module.id} className="admin-module-row">
                   <span className="admin-module-name">{module.name}</span>
-                  {form.role === "admin" ? (
-                    <select value={value} onChange={(event) => setModule(module.id, event.target.value)}
-                      aria-label={`Acceso a ${module.name}`}>
-                      <option value="">Sin acceso</option>
-                      <option value="view">Ver</option>
-                      <option value="edit">Ver y editar</option>
-                    </select>
-                  ) : (
-                    <label className="admin-checkbox">
-                      <input type="checkbox" checked={Boolean(value)}
-                        onChange={(event) => setModule(module.id, event.target.checked ? "view" : "")} />
-                      Ver
-                    </label>
-                  )}
+                  <select value={value} onChange={(event) => setModule(module.id, event.target.value)}
+                    aria-label={`Acceso a ${module.name}`}>
+                    <option value="">Sin acceso</option>
+                    <option value="view">Ver</option>
+                    <option value="edit">Ver y editar</option>
+                  </select>
                 </div>
               );
             })}
@@ -137,10 +129,11 @@ function MembersView() {
 
   const notify = async (email) => {
     try {
-      const sent = await sendMemberInvite(email);
+      const { sent, external } = await sendMemberInvite(email);
+      const passwordNote = external ? " Al abrirlo deberá crear su contraseña." : "";
       setNotice(sent === "invite"
-        ? `Se envió un correo de invitación a ${email}.`
-        : `${email} ya tenía cuenta: se le envió un correo con un enlace de acceso.`);
+        ? `Se envió un correo de invitación a ${email}.${passwordNote}`
+        : `${email} ya tenía cuenta: se le envió un correo con un enlace de acceso.${passwordNote}`);
     } catch (err) {
       setError(`El miembro quedó guardado, pero no se pudo enviar el correo: ${err.message}`);
     }

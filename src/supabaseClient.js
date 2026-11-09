@@ -77,5 +77,5 @@ export async function sendMemberInvite(email) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "No se pudo enviar el correo.");
-  return result.sent;
+  return { sent: result.sent, external: Boolean(result.external) };
 }

@@ -2,6 +2,11 @@
 // and only for an email that is already on the member list. New accounts get a Supabase
 // invitation (Authentication → Email Templates → Invite user); people who already have an
 // account get a magic sign-in link instead.
+// Company-domain members (@celes.ai) only get the email: they sign in with Google Workspace
+// or a link. Anyone else is invited with `needs_password: true` in their user metadata, and
+// the app makes them create a password before entering (SetPasswordScreen in src/Auth.jsx).
+const COMPANY_DOMAINS = ["celes.ai"];
+const isCompanyEmail = (email) => COMPANY_DOMAINS.includes(email.split("@")[1]);
 const ROLE_NAMES = { super_admin: "Super Admin", admin: "Admin", colaborador: "Colaborador", board_member: "Board Member" };
 // Links in the email point to the domain the admin is using (falls back to the primary domain).
 const SITE_URLS = ["https://workspace.celes.ai", "https://cashflow.celes.ai"];
@@ -54,13 +59,19 @@ exports.handler = async (event) => {
     const member = await lookup(email);
     if (!member) return jsonResponse(404, { error: "Ese correo no está en la lista de miembros." });
 
-    const data = { full_name: member.full_name || "", role_name: ROLE_NAMES[member.role] || member.role, invited_by: callerEmail };
+    const external = !isCompanyEmail(email);
+    const data = {
+      full_name: member.full_name || "",
+      role_name: ROLE_NAMES[member.role] || member.role,
+      invited_by: callerEmail,
+      ...(external ? { needs_password: true } : {}),
+    };
     const invite = await fetch(`${supabaseUrl}/auth/v1/invite?redirect_to=${encodeURIComponent(SITE_URL)}`, {
       method: "POST",
       headers: { ...admin, "Content-Type": "application/json" },
       body: JSON.stringify({ email, data }),
     });
-    if (invite.ok) return jsonResponse(200, { sent: "invite" });
+    if (invite.ok) return jsonResponse(200, { sent: "invite", external });
 
     const detail = await invite.json().catch(() => ({}));
     const alreadyRegistered = invite.status === 422 || /already been registered|already exists/i.test(detail.msg || detail.message || detail.error_description || "");
@@ -73,7 +84,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ email, create_user: false }),
     });
     if (!otp.ok) return jsonResponse(502, { error: "La persona ya tenía cuenta y no se pudo enviar el enlace de acceso." });
-    return jsonResponse(200, { sent: "magic_link" });
+    return jsonResponse(200, { sent: "magic_link", external });
   } catch {
     return jsonResponse(502, { error: "Invite service is temporarily unavailable" });
   }

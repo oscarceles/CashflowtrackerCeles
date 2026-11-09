@@ -23,7 +23,7 @@ const moduleAccess = (member, module) => {
     case "super_admin": return "edit";
     case "board_member": return module === "board" ? "view" : null;
     case "admin": return chosen === "view" || chosen === "edit" ? chosen : null;
-    case "colaborador": return chosen === "view" || chosen === "edit" ? "view" : null;
+    case "colaborador": return chosen === "view" || chosen === "edit" ? chosen : null;
     default: return null;
   }
 };

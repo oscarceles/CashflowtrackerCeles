@@ -216,16 +216,71 @@ function LoginForm({ banner }) {
   );
 }
 
+// Shown to members outside the company domain the first time they open their invitation
+// (user_metadata.needs_password, set by netlify/functions/member-invite.cjs), and after a
+// password-recovery link. They cannot enter the app until they set a password.
+function SetPasswordScreen({ email, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 12) return setError("La contraseña debe tener al menos 12 caracteres.");
+    if (password !== confirm) return setError("Las contraseñas no coinciden.");
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password, data: { needs_password: false } });
+      if (error) throw error;
+      onDone();
+    } catch (err) {
+      setError(err.message || "No se pudo guardar la contraseña.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ width: 360, background: T.panel, borderRadius: 12, padding: 32, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: T.ink, marginBottom: 4 }}>Crea tu contraseña</h1>
+        <p style={{ fontSize: 13, color: T.sub, marginBottom: 24 }}>
+          {email}: elige una contraseña para entrar a Celes. La usarás con este correo en “¿Prefieres usar contraseña?”.
+        </p>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <input type="password" required minLength={12} autoComplete="new-password" placeholder="Contraseña (mínimo 12 caracteres)"
+            value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+          <input type="password" required minLength={12} autoComplete="new-password" placeholder="Confirmar contraseña"
+            value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} />
+          <button type="submit" disabled={busy} style={primaryBtn}>{busy ? "..." : "Guardar y entrar"}</button>
+        </form>
+        <button type="button" style={{ ...linkBtn, marginTop: 10 }} onClick={() => supabase.auth.signOut()}>
+          Salir
+        </button>
+        {error && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: T.redBg, color: T.red, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined); // undefined = loading, null = signed out
   const [notAllowed, setNotAllowed] = useState(null);
   const [member, setMember] = useState(null);
+  const [needsPassword, setNeedsPassword] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => checkSession(data.session));
     // Defer with setTimeout: calling supabase.auth.signOut() synchronously
     // inside onAuthStateChange can deadlock the internal auth lock.
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") setNeedsPassword(true);
       setTimeout(() => checkSession(s), 0);
     });
     return () => sub.subscription.unsubscribe();
@@ -234,6 +289,7 @@ export default function AuthGate({ children }) {
   async function checkSession(s) {
     if (!s) {
       setMember(null);
+      setNeedsPassword(false);
       setSession(null);
       return;
     }
@@ -248,6 +304,7 @@ export default function AuthGate({ children }) {
     setNotAllowed(null);
     // Google sign-in provides the profile name and photo in user_metadata.
     const meta = s.user.user_metadata || {};
+    if (meta.needs_password === true) setNeedsPassword(true);
     // Keep the member's Google photo on their People directory card (best effort).
     if (meta.avatar_url || meta.picture) {
       supabase.rpc("people_sync_my_avatar", { url: meta.avatar_url || meta.picture }).then(() => {}, () => {});
@@ -270,6 +327,10 @@ export default function AuthGate({ children }) {
         banner={notAllowed ? `${notAllowed} no tiene acceso a esta app. Contacta al administrador.` : null}
       />
     );
+  }
+
+  if (needsPassword) {
+    return <SetPasswordScreen email={session.user.email} onDone={() => setNeedsPassword(false)} />;
   }
 
   return <MemberContext.Provider value={member}>{children}</MemberContext.Provider>;
