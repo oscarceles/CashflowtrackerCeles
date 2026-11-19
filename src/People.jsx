@@ -6,7 +6,7 @@ import { supabase } from "./supabaseClient";
 import { useMember, isSuperAdmin } from "./access";
 import "./people.css";
 import {
-  MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, suggestedPrima, suggestedDays, downloadCsv,
+  MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, draftLineRow, downloadCsv,
   daysBetween, segmentAmount, buildLiquidationSegments, exitMonthDays, DEEL_HEADER, buildDeelRows,
 } from "./peopleUtils";
 import DirectoryView, { PersonAvatar } from "./PeopleDirectory";
@@ -747,11 +747,7 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
       if (err) throw err;
       emp = data;
     }
-    const { data: line, error: err } = await supabase.from("payroll_lines").insert({
-      period_id: period.id, employee_id: emp.id, name: emp.name, area: emp.area, cost_type: emp.cost_type, role_title: emp.role_title,
-      base_salary: emp.base_salary, allowance: emp.allowance, days: suggestedDays(period, emp.start_date),
-      prima: suggestedPrima(period, emp), platform_fee: period.platform_fee, adjustments: [], source: "app",
-    }).select().single();
+    const { data: line, error: err } = await supabase.from("payroll_lines").insert(draftLineRow(period, emp)).select().single();
     if (err) throw err;
     patchLocal((d) => ({ lines: [...d.lines, line], employees: d.employees.some((e) => e.id === emp.id) ? d.employees.map((e) => (e.id === emp.id ? emp : e)) : [...d.employees, emp] }));
     setAdding(false);

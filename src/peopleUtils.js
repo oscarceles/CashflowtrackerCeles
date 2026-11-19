@@ -64,6 +64,22 @@ export function suggestedDays(period, startDate) {
   return Math.max(0, 30 - Math.min(d, 30) + 1);
 }
 
+/** New payroll line for a person joining a draft payroll (prorated days, suggested prima). */
+export function draftLineRow(period, employee) {
+  return {
+    period_id: period.id, employee_id: employee.id, name: employee.name, area: employee.area, cost_type: employee.cost_type,
+    role_title: employee.role_title, base_salary: employee.base_salary, allowance: employee.allowance,
+    days: suggestedDays(period, employee.start_date), prima: suggestedPrima(period, employee),
+    platform_fee: period.platform_fee, adjustments: [], source: "app",
+  };
+}
+
+/** Draft payrolls a newly created person belongs to: those from their start month onward. */
+export function draftPeriodsFor(periods, employee) {
+  const startMonth = employee.start_date ? employee.start_date.slice(0, 7) : null;
+  return periods.filter((p) => p.status === "draft" && (!startMonth || p.id >= startMonth));
+}
+
 export function downloadCsv(filename, rows) {
   const csv = rows.map((r) => r.map((c) => {
     const s = c == null ? "" : String(c);

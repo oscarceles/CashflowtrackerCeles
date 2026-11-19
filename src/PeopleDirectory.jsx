@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
-import { MONTH_NAMES, areaColor, usd, num, lineTotal } from "./peopleUtils";
+import { MONTH_NAMES, areaColor, usd, num, lineTotal, periodLabel, draftLineRow, draftPeriodsFor } from "./peopleUtils";
 
 const fmtDate = (iso, opts = { day: "2-digit", month: "short", year: "numeric" }) =>
   (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("es-CO", opts) : "—");
@@ -270,7 +270,17 @@ function PersonModal({ employee, privateData, grants, documents, photos, lines, 
         employees: isNew ? [...d.employees, data] : d.employees.map((e) => (e.id === data.id ? data : e)),
         privates: privRow ? [...d.privates.filter((p) => p.employee_id !== data.id), privRow] : d.privates,
       }));
-      if (isNew) onClose(); else { setEditing(false); setForm({ ...data }); }
+      if (isNew) {
+        // A new active person joins every draft payroll from their start month onward, so they show up
+        // in Cálculo de nómina, Payroll mensual and Reportes without adding them by hand.
+        const drafts = draftPeriodsFor(periods, data);
+        if (drafts.length) {
+          const { data: newLines, error: e3 } = await supabase.from("payroll_lines").insert(drafts.map((p) => draftLineRow(p, data))).select();
+          if (e3) window.alert(`La persona se creó, pero no se pudo agregar a la nómina en borrador (${e3.message}). Agrégala desde Cálculo de nómina.`);
+          else patchLocal((d) => ({ lines: [...d.lines, ...newLines] }));
+        }
+        onClose();
+      } else { setEditing(false); setForm({ ...data }); }
     } catch (err) {
       setError(err.message?.includes("people_employees_name_key") ? "Ya existe una persona con ese nombre." : err.message || "No se pudo guardar.");
     } finally {
@@ -342,6 +352,13 @@ function PersonModal({ employee, privateData, grants, documents, photos, lines, 
             ? <FieldGrid fields={PRIVATE_FIELDS} values={priv} editing={editing} onChange={(k, v) => setPriv((p) => ({ ...p, [k]: v }))} />
             : <p className="admin-note">Tu acceso a People es de solo lectura; estos datos no se muestran.</p>}
         </section>
+
+        {isNew && (() => {
+          const drafts = draftPeriodsFor(periods, form);
+          return <p className="admin-note">{drafts.length
+            ? `Al guardar, la persona se agrega a la nómina en borrador de ${drafts.map(periodLabel).join(", ")} (días prorrateados si ingresa en ese mes; prima sugerida en junio y diciembre) y aparece en Cálculo de nómina, Payroll mensual y Reportes.`
+            : "No hay una nómina en borrador desde su mes de ingreso; entrará en el borrador que se cree al cerrar la nómina actual (con 30 días: revisa los días si ingresa a mitad de mes)."}</p>;
+        })()}
 
         {!isNew && (
           <>
