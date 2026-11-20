@@ -6,7 +6,7 @@ import { supabase } from "./supabaseClient";
 import { useMember, isSuperAdmin } from "./access";
 import "./people.css";
 import {
-  MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, draftLineRow, downloadCsv,
+  MONTHS, MONTH_NAMES, areaColor, ADJ_TYPES, usd, usdK, pct, num, periodLabel, adjustmentsTotal, lineTotal, deelFee, lineSubtotal, draftLineRow, downloadCsv,
   daysBetween, segmentAmount, buildLiquidationSegments, exitMonthDays, DEEL_HEADER, buildDeelRows,
 } from "./peopleUtils";
 import DirectoryView, { PersonAvatar } from "./PeopleDirectory";
@@ -657,7 +657,9 @@ function ExitModal({ line, period, employee, lines, canEdit, onRegister, onUndo,
             <div className="people-exit-summary">
               <div><span>Pago del mes ({num(days)} días)</span><b>{usd(monthPay, 2)}</b></div>
               {involuntary && <div><span>Plan de retiro</span><b>{usd(liquidationTotal, 2)}</b></div>}
-              <div className="is-total"><span>Total de la línea (con prima, comisión y novedades)</span><b>{usd(lineTotalPreview, 2)}</b></div>
+              <div><span>Subtotal sin Deel (con prima y novedades)</span><b>{usd(lineTotalPreview - num(line.platform_fee), 2)}</b></div>
+              <div><span>Costo Deel</span><b>{usd(num(line.platform_fee), 2)}</b></div>
+              <div className="is-total"><span>Total de la línea (con Deel)</span><b>{usd(lineTotalPreview, 2)}</b></div>
             </div>
           </>
         )}
@@ -704,6 +706,8 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
   const prevPeriod = [...periods].filter((p) => p.id < periodId).sort((a, b) => b.id.localeCompare(a.id))[0];
   const prevTotal = prevPeriod ? lines.filter((l) => l.period_id === prevPeriod.id).reduce((s, l) => s + lineTotal(l), 0) : 0;
   const total = allPeriodLines.reduce((s, l) => s + lineTotal(l), 0);
+  const deelTotal = allPeriodLines.reduce((s, l) => s + deelFee(l), 0);
+  const subtotal = total - deelTotal;
   const adjTotal = allPeriodLines.reduce((s, l) => s + adjustmentsTotal(l), 0);
   const primaTotal = allPeriodLines.reduce((s, l) => s + num(l.prima), 0);
   const detailed = allPeriodLines.some((l) => l.source === "app");
@@ -827,7 +831,9 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
       </div>
 
       <div className="people-kpi-grid is-compact">
-        <Kpi label="Total a pagar" value={usd(total, 2)} sub={prevPeriod ? `${total >= prevTotal ? "▲" : "▼"} ${usd(Math.abs(total - prevTotal), 2)} vs ${periodLabel(prevPeriod)}` : null} />
+        <Kpi label="Subtotal sin Deel" value={usd(subtotal, 2)} sub="Salario, auxilio, prima, novedades y liquidaciones" />
+        <Kpi label="Costo Deel" value={usd(deelTotal, 2)} sub={`${allPeriodLines.filter((l) => deelFee(l)).length} personas con comisión`} />
+        <Kpi label="Total a pagar" value={usd(total, 2)} sub={prevPeriod ? `Con Deel · ${total >= prevTotal ? "▲" : "▼"} ${usd(Math.abs(total - prevTotal), 2)} vs ${periodLabel(prevPeriod)}` : "Con Deel"} />
         <Kpi label="Personas" value={allPeriodLines.length} />
         <Kpi label="Novedades" value={usd(adjTotal, 2)} sub={`${allPeriodLines.filter((l) => l.adjustments?.length).length} personas con novedades`} />
         {allPeriodLines.some((l) => l.exit_date) && (
@@ -850,7 +856,7 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
             <tr>
               <th className="people-sticky">Persona</th><th>Área</th><th>Tipo</th>
               <th className="num">Salario base</th><th className="num">Auxilio</th><th className="num">Días</th>
-              <th className="num">Prima</th><th className="num">Comisión</th><th className="num">Novedades</th><th className="num">Total</th><th />
+              <th className="num">Prima</th><th className="num">Novedades</th><th className="num">Subtotal</th><th className="num">Comisión Deel</th><th className="num">Total</th><th />
             </tr>
           </thead>
           <tbody>
@@ -887,32 +893,34 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
                       </select>
                     )}
                   </td>
-                  {imported ? <td colSpan={6} className="people-muted">Importado del Excel</td> : <>
+                  {imported ? <td colSpan={7} className="people-muted">Importado del Excel</td> : <>
                     <td className="num"><NumberCell value={l.base_salary} disabled={off} onCommit={(v) => updateLine(l, { base_salary: v })} /></td>
                     <td className="num"><NumberCell value={l.allowance} disabled={off} width={54} onCommit={(v) => updateLine(l, { allowance: v })} /></td>
                     <td className="num"><NumberCell value={l.days} disabled={off} step="0.5" width={48} onCommit={(v) => updateLine(l, { days: Math.max(0, Math.min(31, v)) })} /></td>
                     <td className="num"><NumberCell value={l.prima} disabled={off} width={66} onCommit={(v) => updateLine(l, { prima: v })} /></td>
-                    <td className="num"><NumberCell value={l.platform_fee} disabled={off} width={50} onCommit={(v) => updateLine(l, { platform_fee: v })} /></td>
                     <td className="num">
                       <button className={`people-adj-button${l.adjustments?.length ? " has-items" : ""}`} onClick={() => setAdjFor(l)}>
                         {l.adjustments?.length ? `${usd(adjustmentsTotal(l), 2)} (${l.adjustments.length})` : canEdit ? "+ Agregar" : "—"}
                       </button>
                     </td>
+                    <td className="num">{usd(lineSubtotal(l), 2)}</td>
+                    <td className="num"><NumberCell value={l.platform_fee} disabled={off} width={50} onCommit={(v) => updateLine(l, { platform_fee: v })} /></td>
                   </>}
                   <td className="num"><b>{usd(lineTotal(l), 2)}</b></td>
                   <td>{canEdit && !l.exit_date && !imported && <button className="board-task-remove-file" title="Sacar de la nómina (renuncia o retiro)" aria-label={`Retirar a ${l.name}`} onClick={() => setRemoving(l)}>×</button>}</td>
                 </tr>
               );
             })}
-            {!periodLines.length && <tr><td colSpan={11} className="admin-empty">{search ? "Nadie coincide con la búsqueda." : "Esta nómina no tiene personas."}</td></tr>}
+            {!periodLines.length && <tr><td colSpan={12} className="admin-empty">{search ? "Nadie coincide con la búsqueda." : "Esta nómina no tiene personas."}</td></tr>}
           </tbody>
           <tfoot>
-            <tr><td className="people-sticky">Total</td><td colSpan={8} /><td className="num">{usd(total, 2)}</td><td /></tr>
+            <tr><td className="people-sticky">Total</td><td colSpan={7} />
+              <td className="num">{usd(subtotal, 2)}</td><td className="num">{usd(deelTotal, 2)}</td><td className="num">{usd(total, 2)}</td><td /></tr>
           </tfoot>
         </table>
       </div>
       <p className="admin-note">
-        Total = (salario base + auxilio) / 30 × días + prima + comisión de plataforma + novedades. Los cambios se guardan al salir de cada celda;
+        Subtotal = (salario base + auxilio) / 30 × días + prima + novedades + liquidación, sin el costo de Deel. Total = subtotal + comisión Deel. Los cambios se guardan al salir de cada celda;
         el total lo recalcula la base de datos. Cambiar salario, auxilio, área, tipo o cargo actualiza también la ficha de la persona para las próximas nóminas.
       </p>
 

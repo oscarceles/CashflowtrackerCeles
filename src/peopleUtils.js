@@ -33,6 +33,9 @@ export const lineTotal = (line) => line.source === "import"
   ? num(line.total)
   : Math.round(((num(line.base_salary) + num(line.allowance)) / 30 * num(line.days)
     + num(line.prima) + num(line.platform_fee) + adjustmentsTotal(line) + num(line.liquidation?.total)) * 100) / 100;
+// Deel cost = per-person platform fee. Imported lines only carry the paid total, so their fee is unknown (0).
+export const deelFee = (line) => (line.source === "import" ? 0 : num(line.platform_fee));
+export const lineSubtotal = (line) => Math.round((lineTotal(line) - deelFee(line)) * 100) / 100;
 
 // Excel DAYS360 (US method), mirrors public.days360().
 export function days360(startIso, endIso) {
