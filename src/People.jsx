@@ -737,7 +737,12 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
   const updatePeriod = (patch) => track(async () => {
     const { data, error: err } = await supabase.from("payroll_periods").update(patch).eq("id", period.id).select().single();
     if (err) throw err;
-    patchLocal((d) => ({ periods: d.periods.map((p) => (p.id === period.id ? data : p)) }));
+    // The payroll month follows the pay date: the database may move the period (and its lines) to another id.
+    patchLocal((d) => ({
+      periods: d.periods.map((p) => (p.id === period.id ? data : p)),
+      lines: data.id === period.id ? d.lines : d.lines.map((l) => (l.period_id === period.id ? { ...l, period_id: data.id } : l)),
+    }));
+    if (data.id !== period.id) setPeriodId(data.id);
   });
 
   const addPerson = async ({ existingId, employee }) => {
@@ -815,7 +820,7 @@ function PayrollCalcView({ periods, lines, employees, photos, editable, patchLoc
           </select>
         </label>
         <span className={`people-status is-${period.status}`}>{period.status === "draft" ? "Borrador" : "Cerrada"}</span>
-        <label>Fecha de pago
+        <label title="El mes de la nómina es el mes de la fecha de pago">Fecha de pago
           <input type="date" value={period.pay_date || ""} disabled={!canEdit} onChange={(e) => updatePeriod({ pay_date: e.target.value || null })} />
         </label>
         <label>TRM (COP/USD)

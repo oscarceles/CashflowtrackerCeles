@@ -170,11 +170,13 @@ begin
         updated_by = public.current_member_email()
     where id = period;
 
-  next_year := case when p.month = 12 then p.year + 1 else p.year end;
-  next_month := case when p.month = 12 then 1 else p.month + 1 end;
-  next_id := to_char(make_date(next_year, next_month, 1), 'YYYY-MM');
-  next_pay := case when p.pay_date is null then make_date(next_year, next_month, 25)
+  -- The next payroll is the month after this one's pay date (payroll month = month of payment).
+  next_pay := case when p.pay_date is null
+                   then make_date(case when p.month = 12 then p.year + 1 else p.year end, p.month % 12 + 1, 25)
                    else (p.pay_date + interval '1 month')::date end;
+  next_year := extract(year from next_pay)::int;
+  next_month := extract(month from next_pay)::int;
+  next_id := to_char(next_pay, 'YYYY-MM');
 
   if not exists (select 1 from public.payroll_periods where id = next_id) then
     insert into public.payroll_periods (id, year, month, pay_date, status, fx_rate, platform_fee, updated_by)
@@ -465,3 +467,34 @@ begin
       check (exit_type is null or exit_type in ('voluntario', 'involuntario'));
   end if;
 end $$;
+
+-- The payroll month is the month of its pay date: paid on 25 Nov = November payroll.
+-- Changing pay_date moves the period (id, year, month) and its lines (FK on update cascade).
+alter table public.payroll_lines drop constraint if exists payroll_lines_period_id_fkey;
+alter table public.payroll_lines add constraint payroll_lines_period_id_fkey
+  foreign key (period_id) references public.payroll_periods (id) on delete cascade on update cascade;
+
+create or replace function public.payroll_period_month_from_pay_date()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare target text;
+begin
+  if new.pay_date is null then
+    return new;
+  end if;
+  target := to_char(new.pay_date, 'YYYY-MM');
+  if target <> new.id and (tg_op = 'INSERT' or target <> old.id)
+     and exists (select 1 from public.payroll_periods where id = target) then
+    raise exception 'La fecha de pago % corresponde a la nómina %, que ya existe.', new.pay_date, target;
+  end if;
+  new.id := target;
+  new.year := extract(year from new.pay_date)::int;
+  new.month := extract(month from new.pay_date)::int;
+  return new;
+end;
+$$;
+drop trigger if exists payroll_period_month_from_pay_date on public.payroll_periods;
+create trigger payroll_period_month_from_pay_date before insert or update on public.payroll_periods
+  for each row execute function public.payroll_period_month_from_pay_date();
