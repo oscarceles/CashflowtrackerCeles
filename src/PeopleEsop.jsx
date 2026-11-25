@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
-import { fmtDate, fmtUnits, fmtPrice, fmtUsd, grantStage, REQUEST_STATUS, OPEN_STATUSES, METHOD_LABEL, unitsUsed, availableUnits, REQUEST_COLUMNS } from "./esop";
+import { fmtDate, fmtUnits, fmtPrice, fmtUsd, grantStage, REQUEST_STATUS, OPEN_STATUSES, METHOD_LABEL, unitsUsed, availableUnits, REQUEST_COLUMNS, PURCHASE_RULE } from "./esop";
 import { EsopRequestForm, openSignedDocument } from "./EsopForm";
 
 function Modal({ title, onClose, children, wide }) {
@@ -59,7 +59,7 @@ function PaymentModal({ request, employee, onClose, onSave }) {
   );
 }
 
-/** People > Compra de acciones ESOP: vested options per collaborator and the purchase requests. */
+/** People > Compra de acciones ESOP: options per collaborator, what they can buy today and the purchase requests. */
 export default function EsopView({ employees, editable, reloadPeople }) {
   const [grants, setGrants] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -94,7 +94,7 @@ export default function EsopView({ employees, editable, reloadPeople }) {
   }).sort((a, b) => (b.available - a.available) || (a.e?.name || "").localeCompare(b.e?.name || ""));
 
   const total = options.reduce((s, g) => s + Number(g.units), 0);
-  const vested = options.reduce((s, g) => s + Number(g.vested || 0), 0);
+  const purchasable = options.reduce((s, g) => s + Number(g.purchasable || 0), 0);
   const exercisable = rows.reduce((s, r) => s + r.available, 0);
   const inProcess = rows.reduce((s, r) => s + r.inProcess, 0);
   const bought = rows.reduce((s, r) => s + r.bought, 0);
@@ -127,8 +127,8 @@ export default function EsopView({ employees, editable, reloadPeople }) {
       {error && <div className="board-doc-error" role="alert">{error}</div>}
       <div className="people-kpi-grid">
         <div className="people-kpi"><div className="people-kpi-label">Stock options asignadas</div><div className="people-kpi-value">{fmtUnits(total)}</div><div className="people-kpi-sub">{new Set(options.map((g) => g.employee_id)).size} personas</div></div>
-        <div className="people-kpi"><div className="people-kpi-label">Vestidas a hoy</div><div className="people-kpi-value">{fmtUnits(vested)}</div><div className="people-kpi-sub">1/48 por mes desde el cliff</div></div>
-        <div className="people-kpi"><div className="people-kpi-label">Disponibles para comprar</div><div className="people-kpi-value">{fmtUnits(exercisable)}</div><div className="people-kpi-sub">Vestidas y sin solicitar</div></div>
+        <div className="people-kpi"><div className="people-kpi-label">Habilitadas para compra a hoy</div><div className="people-kpi-value">{fmtUnits(purchasable)}</div><div className="people-kpi-sub">{PURCHASE_RULE}</div></div>
+        <div className="people-kpi"><div className="people-kpi-label">Disponibles para comprar</div><div className="people-kpi-value">{fmtUnits(exercisable)}</div><div className="people-kpi-sub">Habilitadas y sin solicitar</div></div>
         <div className="people-kpi"><div className="people-kpi-label">En proceso</div><div className="people-kpi-value">{fmtUnits(inProcess)}</div><div className="people-kpi-sub">Solicitadas o aprobadas en pago</div></div>
         <div className="people-kpi"><div className="people-kpi-label">Compradas</div><div className="people-kpi-value">{fmtUnits(bought)}</div><div className="people-kpi-sub">{bought ? "Pagadas en su totalidad" : "Nadie ha comprado aún"}</div></div>
       </div>
@@ -177,7 +177,7 @@ export default function EsopView({ employees, editable, reloadPeople }) {
       <h2 className="esop-title">Stock options por persona</h2>
       <div className="admin-table-wrap">
         <table className="people-table">
-          <thead><tr><th>Persona</th><th className="num">Asignadas</th><th>Cliff</th><th>Vencimiento</th><th>Vesting</th><th className="num">Vestidas</th><th className="num">Compradas</th><th className="num">En proceso</th><th className="num">Disponibles</th><th /></tr></thead>
+          <thead><tr><th>Persona</th><th className="num">Asignadas</th><th>Cliff</th><th>Vencimiento</th><th>Compra</th><th className="num">Habilitadas</th><th className="num">Compradas</th><th className="num">En proceso</th><th className="num">Disponibles</th><th /></tr></thead>
           <tbody>
             {rows.map(({ g, e, stage, bought: b, inProcess: p, available }) => (
               <tr key={g.id}>
@@ -186,7 +186,7 @@ export default function EsopView({ employees, editable, reloadPeople }) {
                 <td>{fmtDate(g.cliff_date)}</td>
                 <td>{fmtDate(g.expiration_date)}</td>
                 <td><span className={`people-chip is-${stage.tone}`}>{stage.label}</span></td>
-                <td className="num">{fmtUnits(g.vested)}</td>
+                <td className="num">{fmtUnits(g.purchasable)}</td>
                 <td className="num">{fmtUnits(b)}</td>
                 <td className="num">{fmtUnits(p)}</td>
                 <td className="num">{fmtUnits(available)}</td>
@@ -197,7 +197,7 @@ export default function EsopView({ employees, editable, reloadPeople }) {
           </tbody>
         </table>
       </div>
-      <p className="admin-note">Vesting: nada antes del cliff; desde la fecha del cliff se puede comprar 1/48 de la asignación por mes durante 4 años (acciones enteras). Las deducciones de nómina aparecen como novedad “Compra ESOP” en Cálculo de nómina; si se quita una cuota de una nómina, pasa a la siguiente.</p>
+      <p className="admin-note">Ninguna opción está vestida hasta que se compra. Opción de compra: nada antes del cliff; en la fecha del cliff se habilita el 25% de la asignación y el 75% restante mes a mes durante 2 años (acciones enteras). Las deducciones de nómina aparecen como novedad “Compra ESOP” en Cálculo de nómina; si se quita una cuota de una nómina, pasa a la siguiente.</p>
 
       {requesting && (
         <Modal title={`Solicitud de compra · ${requesting.e?.name || ""}`} onClose={() => setRequesting(null)} wide>

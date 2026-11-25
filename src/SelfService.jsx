@@ -5,7 +5,7 @@ import { fmtDate, fmtUnits, fmtPrice, fmtUsd, grantStage, REQUEST_STATUS, METHOD
 import { EsopRequestForm, openSignedDocument } from "./EsopForm";
 
 const SECTIONS = [
-  { id: "esop", label: "Stock options", icon: "◔", title: "Mis stock options", text: "Tus opciones, cuánto has vestido y tus solicitudes de compra." },
+  { id: "esop", label: "Stock options", icon: "◔", title: "Mis stock options", text: "Tus opciones, cuántas puedes comprar hoy y tus solicitudes de compra." },
 ];
 
 /** Portal for every collaborator: only their own data (esop_self). More requests will be added here. */
@@ -50,7 +50,7 @@ export default function SelfServiceWorkspace() {
         ) : requesting ? (
           <div className="esop-portal-form">
             <h2 className="esop-title">Solicitud de compra de acciones</h2>
-            <p className="admin-note">Puedes comprar hasta <b>{fmtUnits(requesting.available)}</b> acciones vestidas de esta asignación. Llena el formato, léelo y fírmalo.</p>
+            <p className="admin-note">Puedes comprar hasta <b>{fmtUnits(requesting.available)}</b> acciones habilitadas de esta asignación. Llena el formato, léelo y fírmalo.</p>
             <EsopRequestForm employee={data.employee} grant={requesting.g} available={requesting.available} settings={data.settings}
               onCancel={() => setRequesting(null)} onDone={() => { setRequesting(null); setDone(true); load(); }} />
           </div>
@@ -59,7 +59,7 @@ export default function SelfServiceWorkspace() {
             {done && <div className="admin-notice" role="status">Tu solicitud quedó firmada y enviada. People la revisará y te informará el precio por acción al aprobarla.</div>}
             <div className="admin-table-wrap">
               <table className="people-table">
-                <thead><tr><th>Tipo</th><th className="num">Asignadas</th><th>Inicio vesting</th><th>Cliff</th><th>Vencimiento</th><th>Estado</th><th className="num">Vestidas</th><th className="num">Compradas</th><th className="num">Disponibles</th><th /></tr></thead>
+                <thead><tr><th>Tipo</th><th className="num">Asignadas</th><th>Inicio</th><th>Cliff</th><th>Vencimiento</th><th>Estado</th><th className="num">Habilitadas</th><th className="num">Compradas</th><th className="num">Disponibles</th><th /></tr></thead>
                 <tbody>
                   {grants.map((g) => {
                     const st = grantStage(g);
@@ -70,7 +70,7 @@ export default function SelfServiceWorkspace() {
                         <td className="num">{fmtUnits(g.units)}</td>
                         <td>{fmtDate(g.vesting_start)}</td><td>{fmtDate(g.cliff_date)}</td><td>{fmtDate(g.expiration_date)}</td>
                         <td><span className={`people-chip is-${st.tone}`}>{st.label}</span></td>
-                        <td className="num">{g.grant_type === "Stock options" ? fmtUnits(g.vested) : "—"}</td>
+                        <td className="num">{g.grant_type === "Stock options" ? fmtUnits(g.purchasable) : "—"}</td>
                         <td className="num">{fmtUnits(g.bought)}</td>
                         <td className="num">{fmtUnits(available)}</td>
                         <td className="admin-row-actions">{available > 0 && <button className="admin-primary-button" onClick={() => { setDone(false); setRequesting({ g, available }); }}>Solicitar compra</button>}</td>
@@ -81,7 +81,7 @@ export default function SelfServiceWorkspace() {
                 </tbody>
               </table>
             </div>
-            <p className="admin-note">Desde la fecha del cliff puedes comprar 1/48 de tu asignación por cada mes, durante 4 años. Puedes pagar con deducción de nómina en cuotas o con transferencia a la cuenta de Celes. El precio por acción lo define la Compañía al aprobar cada compra.</p>
+            <p className="admin-note">En la fecha del cliff puedes comprar hasta el 25% de tu asignación; el 75% restante se habilita mes a mes durante los 2 años siguientes. Puedes comprar mes a mes, cuando quieras, dentro de lo habilitado. Puedes pagar con deducción de nómina en cuotas o con transferencia a la cuenta de Celes. El precio por acción lo define la Compañía al aprobar cada compra.</p>
 
             <h2 className="esop-title">Mis solicitudes</h2>
             <div className="admin-table-wrap">

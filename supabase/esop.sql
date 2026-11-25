@@ -1,7 +1,7 @@
 -- ESOP: pool status (Board) and stock option purchase requests (People).
 -- Run after people.sql, board.sql and security-hardening.sql. Safe to re-run.
 --
--- Flow: a People editor registers a request for a collaborator's vested grant (cliff reached,
+-- Flow: a request is made for the part of a collaborator's grant that can already be bought (cliff reached,
 -- not expired) -> approve (fixes price and amount) -> payment:
 --   * payroll deduction: N installments, added automatically as "Deducción" adjustments to the
 --     draft payrolls; an installment counts as paid when the payroll that carries it is closed.
@@ -56,10 +56,12 @@ create table if not exists public.esop_installments (
   unique (request_id, n)
 );
 
--- Vesting: nothing before the cliff; from the cliff date on, 1/48 of the grant per month for
--- 4 years (the first portion on the cliff date, one more on the same day of each following month).
--- Whole shares only. Only active stock options vest for purchase.
-create or replace function public.esop_vested_units(g public.people_equity_grants, on_date date default current_date)
+-- Purchase window (nothing is vested until it is bought): nothing before the cliff; on the cliff date
+-- 25% of the grant can be bought, then the remaining 75% opens in 24 equal monthly parts (one more on
+-- the same day of each following month), so 100% is available 2 years after the cliff.
+-- Whole shares only. Only active stock options can be bought.
+drop function if exists public.esop_vested_units(public.people_equity_grants, date) cascade;
+create or replace function public.esop_purchasable_units(g public.people_equity_grants, on_date date default current_date)
 returns numeric
 language sql
 stable
@@ -67,12 +69,12 @@ set search_path = ''
 as $$
   select case
     when g.grant_type <> 'Stock options' or g.status <> 'Active' or g.cliff_date is null or on_date < g.cliff_date then 0
-    else floor(g.units * least(48, (extract(year from age(on_date, g.cliff_date)) * 12
-                                    + extract(month from age(on_date, g.cliff_date)))::int + 1) / 48.0)
+    else floor(g.units * (0.25 + 0.75 * least(24, (extract(year from age(on_date, g.cliff_date)) * 12
+                                                  + extract(month from age(on_date, g.cliff_date)))::int) / 24.0))
   end;
 $$;
 
--- Validation: only vested, active stock options, never more units than are left on the grant.
+-- Validation: only active stock options within their purchase window, never more units than are left on the grant.
 create or replace function public.esop_request_validate()
 returns trigger
 language plpgsql
@@ -90,8 +92,8 @@ begin
     if g.cliff_date is null or g.cliff_date > current_date then raise exception 'Las opciones aún no cumplen el cliff (%).', coalesce(to_char(g.cliff_date, 'YYYY-MM-DD'), 'sin fecha'); end if;
     select coalesce(sum(units), 0) into used from public.esop_requests
       where grant_id = new.grant_id and status in ('requested', 'approved', 'paid');
-    if used + new.units > public.esop_vested_units(g) then
-      raise exception 'Hoy hay % acciones vestidas disponibles para comprar en esta asignación.', greatest(0, public.esop_vested_units(g) - used);
+    if used + new.units > public.esop_purchasable_units(g) then
+      raise exception 'Hoy hay % acciones habilitadas para comprar en esta asignación.', greatest(0, public.esop_purchasable_units(g) - used);
     end if;
     if g.expiration_date is not null and g.expiration_date < current_date then raise exception 'Las opciones vencieron el %.', g.expiration_date; end if;
     if new.payment_method = 'transfer' then new.installments := 1; end if;
@@ -263,7 +265,7 @@ as $$
     'settings', (select to_jsonb(s) from public.esop_settings s where id = 1),
     'grants', coalesce((
       select jsonb_agg(jsonb_build_object(
-        'id', g.id, 'employee_id', g.employee_id, 'holder', e.name, 'active', e.active, 'vested', public.esop_vested_units(g), 'grant_type', g.grant_type, 'units', g.units,
+        'id', g.id, 'employee_id', g.employee_id, 'holder', e.name, 'active', e.active, 'purchasable', public.esop_purchasable_units(g), 'grant_type', g.grant_type, 'units', g.units,
         'vesting_start', g.vesting_start, 'cliff_date', g.cliff_date, 'expiration_date', g.expiration_date,
         'status', g.status, 'signed', g.signed, 'exercise_price', g.exercise_price,
         'bought', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status = 'paid'), 0),
@@ -343,7 +345,7 @@ $$;
 revoke all on function public.self_employee_id() from public, anon;
 grant execute on function public.self_employee_id() to authenticated;
 
--- Portal data: my profile, my grants (with vesting) and my requests. Nothing about anyone else.
+-- Portal data: my profile, my grants (with what can be bought today) and my requests. Nothing about anyone else.
 create or replace function public.esop_self()
 returns jsonb
 language sql
@@ -359,7 +361,7 @@ as $$
     'settings', (select jsonb_build_object('max_installments', s.max_installments, 'payment_instructions', s.payment_instructions) from public.esop_settings s where id = 1),
     'grants', coalesce((select jsonb_agg(jsonb_build_object(
         'id', g.id, 'grant_type', g.grant_type, 'units', g.units, 'vesting_start', g.vesting_start, 'cliff_date', g.cliff_date,
-        'expiration_date', g.expiration_date, 'status', g.status, 'signed', g.signed, 'vested', public.esop_vested_units(g),
+        'expiration_date', g.expiration_date, 'status', g.status, 'signed', g.signed, 'purchasable', public.esop_purchasable_units(g),
         'used', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status in ('requested', 'approved', 'paid')), 0),
         'bought', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status = 'paid'), 0)
       ) order by g.vesting_start) from public.people_equity_grants g where g.employee_id = (select id from me)), '[]'::jsonb),

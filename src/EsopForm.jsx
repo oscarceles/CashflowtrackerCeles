@@ -16,7 +16,7 @@ export function buildFormText({ name, idNumber, grant, units, method, installmen
     `Colaborador(a): ${name}`,
     `Documento de identidad: ${idNumber}`,
     "",
-    `Yo, ${name}, identificado(a) con el documento ${idNumber}, solicito ejercer ${fmtUnits(units)} opciones de compra de acciones (Common Stock) de Celes Technologies, Inc., de mi asignación de ${fmtUnits(grant.units)} opciones con inicio de vesting el ${fmtDate(grant.vesting_start)}, cliff el ${fmtDate(grant.cliff_date)} y vencimiento el ${fmtDate(grant.expiration_date)}.`,
+    `Yo, ${name}, identificado(a) con el documento ${idNumber}, solicito ejercer ${fmtUnits(units)} opciones de compra de acciones (Common Stock) de Celes Technologies, Inc., de mi asignación de ${fmtUnits(grant.units)} opciones con fecha de inicio el ${fmtDate(grant.vesting_start)}, cliff el ${fmtDate(grant.cliff_date)} y vencimiento el ${fmtDate(grant.expiration_date)}.`,
     "",
     pay,
     "",
@@ -62,7 +62,7 @@ function SignaturePad({ onChange }) {
 
 /**
  * Fillable and signable purchase request. `employee` = { name, legal_name, id_number };
- * `grant` = { id, units, vesting_start, cliff_date, expiration_date }; `available` = vested units not yet requested.
+ * `grant` = { id, units, vesting_start, cliff_date, expiration_date }; `available` = units that can be bought today and are not yet requested.
  */
 export function EsopRequestForm({ employee, grant, available, settings, onDone, onCancel, onBehalf }) {
   const maxInst = settings?.max_installments || 12;

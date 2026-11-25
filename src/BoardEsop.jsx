@@ -5,7 +5,7 @@ import { fmtDate, fmtUnits, fmtUsd, grantStage } from "./esop";
 
 const pct = (n, d) => (d ? `${((n / d) * 100).toFixed(1)}%` : "—");
 // Validated categorical order shared with People (dataviz palette).
-const COLORS = { bought: "#1baf7a", process: "#eda100", exercisable: "#2a78d6", unvested: "#4a3aa7", restricted: "#e87ba4", unallocated: "#cbd5e1" };
+const COLORS = { bought: "#1baf7a", process: "#eda100", exercisable: "#2a78d6", notyet: "#4a3aa7", restricted: "#e87ba4", unallocated: "#cbd5e1" };
 
 function Settings({ settings, editable, onSaved }) {
   const [form, setForm] = useState(settings);
@@ -38,7 +38,7 @@ function Settings({ settings, editable, onSaved }) {
   );
 }
 
-/** Board > ESOP: pool status, vesting and purchases (fed by People > Compra de acciones ESOP). */
+/** Board > ESOP: pool status, purchase windows and purchases (fed by People > Compra de acciones ESOP). */
 export default function EsopBoardView({ editable }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -56,14 +56,14 @@ export default function EsopBoardView({ editable }) {
   const restricted = granted - options.reduce((t, g) => t + Number(g.units), 0);
   const bought = grants.reduce((t, g) => t + Number(g.bought), 0);
   const process = grants.reduce((t, g) => t + Number(g.in_process), 0);
-  const vested = options.reduce((t, g) => t + Number(g.vested || 0), 0);
-  const exercisable = options.reduce((t, g) => t + (grantStage(g).exercisable ? Math.max(0, Number(g.vested || 0) - Number(g.bought) - Number(g.in_process)) : 0), 0);
-  const unvested = Math.max(0, granted - restricted - bought - process - exercisable);
+  const purchasable = options.reduce((t, g) => t + Number(g.purchasable || 0), 0);
+  const exercisable = options.reduce((t, g) => t + (grantStage(g).exercisable ? Math.max(0, Number(g.purchasable || 0) - Number(g.bought) - Number(g.in_process)) : 0), 0);
+  const notYet = Math.max(0, granted - restricted - bought - process - exercisable);
   const unallocated = Math.max(0, pool - granted);
   const paid = grants.reduce((t, g) => t + Number(g.paid_amount), 0);
   const segments = [
     ["bought", "Compradas", bought], ["process", "En proceso de compra", process], ["exercisable", "Ejercibles sin comprar", exercisable],
-    ["unvested", "Sin vestir aún", unvested], ["restricted", "Common stock (sin compra)", restricted], ["unallocated", "Sin asignar", unallocated],
+    ["notyet", "Aún no habilitadas para compra", notYet], ["restricted", "Common stock (sin compra)", restricted], ["unallocated", "Sin asignar", unallocated],
   ];
   const base = Math.max(pool, granted);
 
@@ -73,7 +73,7 @@ export default function EsopBoardView({ editable }) {
         <div>
           <div className="board-eyebrow">BOARD · ESOP</div>
           <h1>ESOP</h1>
-          <p>Estado del plan de stock options: pool, asignaciones, vesting y compras de los colaboradores. Las compras se gestionan en People › Compra de acciones ESOP.</p>
+          <p>Estado del plan de stock options: pool, asignaciones, opción de compra y compras de los colaboradores. Las compras se gestionan en People › Compra de acciones ESOP.</p>
         </div>
       </div>
       {error && <div className="board-doc-error" role="alert">{error}</div>}
@@ -89,7 +89,7 @@ export default function EsopBoardView({ editable }) {
             <div className="people-kpi"><div className="people-kpi-label">Pool ESOP</div><div className="people-kpi-value">{fmtUnits(pool)}</div><div className="people-kpi-sub">Acciones reservadas</div></div>
             <div className="people-kpi"><div className="people-kpi-label">Asignadas</div><div className="people-kpi-value">{fmtUnits(granted)}</div><div className="people-kpi-sub">{pct(granted, pool)} del pool · {new Set(grants.map((g) => g.holder)).size} personas</div></div>
             <div className="people-kpi"><div className="people-kpi-label">Sin asignar</div><div className="people-kpi-value">{fmtUnits(unallocated)}</div><div className="people-kpi-sub">{granted > pool ? "Lo asignado supera el pool" : "Disponibles para nuevas asignaciones"}</div></div>
-            <div className="people-kpi"><div className="people-kpi-label">Vestidas sin comprar</div><div className="people-kpi-value">{fmtUnits(exercisable)}</div><div className="people-kpi-sub">{fmtUnits(vested)} vestidas a hoy (1/48 por mes desde el cliff)</div></div>
+            <div className="people-kpi"><div className="people-kpi-label">Habilitadas sin comprar</div><div className="people-kpi-value">{fmtUnits(exercisable)}</div><div className="people-kpi-sub">{fmtUnits(purchasable)} habilitadas a hoy (25% en el cliff, luego mensual 2 años)</div></div>
             <div className="people-kpi"><div className="people-kpi-label">En proceso</div><div className="people-kpi-value">{fmtUnits(process)}</div><div className="people-kpi-sub">Solicitadas o en pago</div></div>
             <div className="people-kpi"><div className="people-kpi-label">Compradas</div><div className="people-kpi-value">{fmtUnits(bought)}</div><div className="people-kpi-sub">{fmtUsd(paid)} recibidos</div></div>
           </div>
@@ -102,7 +102,7 @@ export default function EsopBoardView({ editable }) {
 
           <div className="admin-table-wrap">
             <table className="people-table">
-              <thead><tr><th>Colaborador</th><th>Tipo</th><th className="num">Unidades</th><th>Inicio vesting</th><th>Cliff</th><th>Vencimiento</th><th>Vesting</th><th className="num">Vestidas</th><th>Firmado</th><th className="num">Compradas</th><th className="num">En proceso</th></tr></thead>
+              <thead><tr><th>Colaborador</th><th>Tipo</th><th className="num">Unidades</th><th>Inicio</th><th>Cliff</th><th>Vencimiento</th><th>Compra</th><th className="num">Habilitadas</th><th>Firmado</th><th className="num">Compradas</th><th className="num">En proceso</th></tr></thead>
               <tbody>
                 {grants.map((g) => {
                   const st = grantStage(g);
@@ -113,7 +113,7 @@ export default function EsopBoardView({ editable }) {
                       <td className="num">{fmtUnits(g.units)}</td>
                       <td>{fmtDate(g.vesting_start)}</td><td>{fmtDate(g.cliff_date)}</td><td>{fmtDate(g.expiration_date)}</td>
                       <td><span className={`people-chip is-${st.tone}`}>{st.label}</span></td>
-                      <td className="num">{g.grant_type === "Stock options" ? fmtUnits(g.vested) : "—"}</td>
+                      <td className="num">{g.grant_type === "Stock options" ? fmtUnits(g.purchasable) : "—"}</td>
                       <td>{g.signed ? "Sí" : "No"}</td>
                       <td className="num">{fmtUnits(g.bought)}</td>
                       <td className="num">{fmtUnits(g.in_process)}</td>
@@ -124,7 +124,7 @@ export default function EsopBoardView({ editable }) {
               </tbody>
             </table>
           </div>
-          <p className="admin-note">Asignaciones tomadas de las fichas de People (Directorio). Vesting: nada antes del cliff; desde la fecha del cliff se vuelve comprable 1/48 de la asignación por mes durante 4 años. El Common stock asignado no requiere compra. Las compras se marcan como compradas cuando se paga el total: por transferencia, al registrar el pago; por nómina, al cerrar la nómina de la última cuota.{!editable && " Tu acceso a Board es de solo lectura."}</p>
+          <p className="admin-note">Asignaciones tomadas de las fichas de People (Directorio). Ninguna opción está vestida hasta que se compra. Opción de compra: nada antes del cliff; en la fecha del cliff se habilita el 25% de la asignación y el 75% restante mes a mes durante 2 años. El Common stock asignado no requiere compra. Las compras se marcan como compradas cuando se paga el total: por transferencia, al registrar el pago; por nómina, al cerrar la nómina de la última cuota.{!editable && " Tu acceso a Board es de solo lectura."}</p>
         </>
       )}
     </div>
