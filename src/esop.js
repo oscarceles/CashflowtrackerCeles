@@ -8,13 +8,19 @@ export const fmtUsd = (n) => `USD ${Number(n || 0).toLocaleString("en-US", { min
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-/** Vesting stage from the grant dates. The schedule has no partial vesting: everything vests at the cliff. */
+/**
+ * Vesting stage. `vested` comes from the database (esop_vested_units): nothing before the cliff,
+ * then 1/48 of the grant per month for 4 years starting on the cliff date.
+ */
 export function grantStage(g) {
   if (g.grant_type && g.grant_type !== "Stock options") return { label: g.grant_type, tone: "muted", exercisable: false };
   if (g.status && g.status.toLowerCase() !== "active") return { label: g.status, tone: "muted", exercisable: false };
   if (g.expiration_date && today() > g.expiration_date) return { label: "Vencida", tone: "muted", exercisable: false };
-  if (g.cliff_date && today() >= g.cliff_date) return { label: "Ejercible", tone: "good", exercisable: true };
-  return { label: g.cliff_date ? `Cliff el ${fmtDate(g.cliff_date)}` : "Sin cliff", tone: "wait", exercisable: false };
+  if (!g.cliff_date || today() < g.cliff_date) return { label: g.cliff_date ? `Cliff el ${fmtDate(g.cliff_date)}` : "Sin cliff", tone: "wait", exercisable: false };
+  const vested = Number(g.vested || 0), units = Number(g.units || 0);
+  return vested >= units
+    ? { label: "Totalmente vestida", tone: "good", exercisable: true }
+    : { label: `Vesting ${fmtUnits(vested)} de ${fmtUnits(units)}`, tone: "good", exercisable: true };
 }
 
 export const REQUEST_STATUS = {
@@ -31,3 +37,9 @@ export const METHOD_LABEL = { payroll: "Deducción de nómina", transfer: "Trans
 export const unitsUsed = (requests, grantId) => requests
   .filter((r) => r.grant_id === grantId && [...OPEN_STATUSES, "paid"].includes(r.status))
   .reduce((s, r) => s + Number(r.units || 0), 0);
+
+/** Vested units still free to request. */
+export const availableUnits = (g, used) => (grantStage(g).exercisable ? Math.max(0, Number(g.vested || 0) - used) : 0);
+
+/** Columns People can read (signature and form are only read through esop_request_document). */
+export const REQUEST_COLUMNS = "id,grant_id,employee_id,units,price,amount,payment_method,installments,status,notes,requested_at,requested_by,decided_at,decided_by,decision_note,paid_at,payment_reference,channel,signer_name,signed_at,signed_by";

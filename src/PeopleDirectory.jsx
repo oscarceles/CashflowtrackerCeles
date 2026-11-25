@@ -206,7 +206,7 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
       </table>
       {draft && (
         <div className="people-inline-form">
-          <label className="admin-field"><span>Tipo</span><select value={draft.grant_type || "Stock options"} onChange={(e) => setDraft({ ...draft, grant_type: e.target.value })}><option>Stock options</option><option>Restricted stock</option></select></label>
+          <label className="admin-field"><span>Tipo</span><select value={draft.grant_type || "Stock options"} onChange={(e) => setDraft({ ...draft, grant_type: e.target.value })}><option>Stock options</option><option>Common stock</option></select></label>
           <label className="admin-field"><span>Unidades</span><input type="number" value={draft.units ?? ""} onChange={(e) => setDraft({ ...draft, units: e.target.value })} /></label>
           <label className="admin-field"><span>Inicio vesting</span><input type="date" value={draft.vesting_start || ""} onChange={(e) => setDraft({ ...draft, vesting_start: e.target.value })} /></label>
           <label className="admin-field"><span>Cliff</span><input type="date" value={draft.cliff_date || ""} onChange={(e) => setDraft({ ...draft, cliff_date: e.target.value })} /></label>

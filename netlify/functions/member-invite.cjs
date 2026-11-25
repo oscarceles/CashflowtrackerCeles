@@ -7,7 +7,7 @@
 // the app makes them create a password before entering (SetPasswordScreen in src/Auth.jsx).
 const COMPANY_DOMAINS = ["celes.ai"];
 const isCompanyEmail = (email) => COMPANY_DOMAINS.includes(email.split("@")[1]);
-const ROLE_NAMES = { super_admin: "Super Admin", admin: "Admin", colaborador: "Colaborador", board_member: "Board Member" };
+const ROLE_NAMES = { super_admin: "Super Admin", admin: "Admin", colaborador: "Colaborador", board_member: "Board Member", empleado: "Empleado" };
 // Links in the email point to the domain the admin is using (falls back to the primary domain).
 const SITE_URLS = ["https://workspace.celes.ai", "https://cashflow.celes.ai"];
 const siteUrlFor = (event) => {

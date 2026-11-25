@@ -14,6 +14,7 @@ import UserMenu from "./UserMenu";
 import PeopleWorkspace from "./People";
 import CapTableView from "./BoardCapTable";
 import EsopBoardView from "./BoardEsop";
+import SelfServiceWorkspace from "./SelfService";
 import LocalEntityView from "./BoardEntities";
 import FinancialsTool from "./Consolidation";
 import KpisView from "./BoardKpis";
@@ -1815,6 +1816,14 @@ export default function App() {
     { id: "board", name: "Board", description: "Legal Docs Series A, tareas y entidades locales.", icon: "▦", color: "#2A5AF4" },
     { id: "people", name: "People", description: "Nómina mes a mes, cálculo de la próxima nómina y reportes del equipo.", icon: "◉", color: "#2A5AF4" },
   ].filter((item) => canView(member, item.id));
+  // Mis solicitudes: every collaborator linked to their People record (and every Empleado).
+  const [selfLinked, setSelfLinked] = useState(false);
+  useEffect(() => {
+    supabase.rpc("self_employee_id").then(({ data }) => setSelfLinked(Boolean(data)));
+  }, []);
+  if (selfLinked || member?.role === "empleado") {
+    moduleCards.push({ id: "self", name: "Mis solicitudes", description: "Tus stock options: vesting, solicitud de compra con formato firmado y estado de tus solicitudes.", icon: "✎", color: "#2A5AF4", own: true });
+  }
   // Administración lives in the profile menu (top right), only for Super Admin.
   const hasAccess = (id) => id === "admin" ? isSuperAdmin(member) : moduleCards.some((item) => item.id === id);
   const openAdmin = () => setModule("admin");
@@ -1837,6 +1846,8 @@ export default function App() {
         <main style={{ maxWidth: module === "people" ? 1440 : 1160, margin: "0 auto", padding: "72px 32px 64px" }}>
           {module === "board" && hasAccess("board") ? (
             <BoardWorkspace editable={canEdit(member, "board")} />
+          ) : module === "self" && hasAccess("self") ? (
+            <SelfServiceWorkspace />
           ) : module === "people" && hasAccess("people") ? (
             <PeopleWorkspace editable={canEdit(member, "people")} />
           ) : module === "admin" && hasAccess("admin") ? (
@@ -1877,7 +1888,7 @@ export default function App() {
                     <span style={{ display: "block", marginTop: 8, color: "#596579", fontSize: 13, lineHeight: 1.55 }}>{item.description}</span>
                     <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto", paddingTop: 18 }}>
                       <span style={{ color: "#2A5AF4", fontSize: 12, fontWeight: 600 }}>
-                        {!canEdit(member, item.id) ? "Abrir · Solo lectura" : "Abrir módulo"}
+                        {item.own ? "Abrir" : !canEdit(member, item.id) ? "Abrir · Solo lectura" : "Abrir módulo"}
                       </span>
                     </span>
                   </button>

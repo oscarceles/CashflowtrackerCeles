@@ -15,6 +15,7 @@ export const ROLES = [
   { id: "admin", name: "Admin", description: "Ve o edita los módulos que se le asignen." },
   { id: "colaborador", name: "Colaborador", description: "Ve o edita los módulos que se le asignen." },
   { id: "board_member", name: "Board Member", description: "Solo puede leer la información de Board." },
+  { id: "empleado", name: "Empleado", description: "Solo accede a Mis solicitudes (stock options y otras solicitudes propias)." },
 ];
 
 export const roleName = (role) => ROLES.find((item) => item.id === role)?.name || role;

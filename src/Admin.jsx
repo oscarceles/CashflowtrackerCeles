@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listMembers, addMember, updateMember, removeMember, sendMemberInvite } from "./supabaseClient";
+import { supabase, listMembers, addMember, updateMember, removeMember, sendMemberInvite } from "./supabaseClient";
 import { MODULES, ROLES, roleName, moduleAccess, useMember } from "./access";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -10,6 +10,7 @@ const emptyMember = { email: "", full_name: "", role: "colaborador", modules: {}
 function normaliseModules(role, modules) {
   if (role === "super_admin") return {};
   if (role === "board_member") return { board: "view" };
+  if (role === "empleado") return {};
   const result = {};
   for (const { id } of MODULES) {
     const value = modules?.[id];
@@ -85,6 +86,8 @@ function MemberForm({ initial, isNew, onSave, onCancel, busy }) {
         <legend>Módulos</legend>
         {form.role === "super_admin" ? (
           <p className="admin-note">Acceso total: ve y edita todos los módulos y administra miembros.</p>
+        ) : form.role === "empleado" ? (
+          <p className="admin-note">Sin módulos: solo ve Mis solicitudes con sus propios datos (se vincula a su ficha de People por el correo).</p>
         ) : form.role === "board_member" ? (
           <p className="admin-note">Solo lectura de Board (documentos y tareas). No puede editar ni ver otros módulos.</p>
         ) : (
@@ -118,6 +121,98 @@ function MemberForm({ initial, isNew, onSave, onCancel, busy }) {
   );
 }
 
+const cleanEmail = (v) => { const e = String(v || "").trim().toLowerCase(); return EMAIL_PATTERN.test(e) && !/[s;,]/.test(e) ? e : null; };
+
+/**
+ * Creates an "Empleado" access for every active collaborator in People (email: corporate, else
+ * personal, else Deel). Invitations are a separate step, so nobody is emailed by accident.
+ */
+function CollaboratorAccess({ members, me, onClose, onChanged }) {
+  const [employees, setEmployees] = useState(null);
+  const [selected, setSelected] = useState({});
+  const [created, setCreated] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    supabase.from("people_employees").select("id,name,work_email,personal_email,deel_email,active").eq("active", true).order("name")
+      .then(({ data, error: err }) => {
+        if (err) return setError(err.message);
+        setEmployees(data || []);
+      });
+  }, []);
+
+  const byEmail = Object.fromEntries(members.map((m) => [m.email, m]));
+  const rows = (employees || []).map((e) => {
+    const emails = [e.work_email, e.personal_email, e.deel_email].map(cleanEmail).filter(Boolean);
+    const existing = emails.map((x) => byEmail[x]).find(Boolean);
+    return { e, email: emails[0] || null, existing };
+  });
+  const pending = rows.filter((r) => r.email && !r.existing);
+  useEffect(() => { setSelected(Object.fromEntries(pending.map((r) => [r.e.id, true]))); }, [employees, members.length]);
+  const chosen = pending.filter((r) => selected[r.e.id]);
+
+  const create = async () => {
+    if (!window.confirm(`¿Crear ${chosen.length} accesos con rol Empleado? No se envía ningún correo todavía.`)) return;
+    setBusy(true); setError(null);
+    const ok = [], failed = [];
+    for (const r of chosen) {
+      try { await addMember({ email: r.email, full_name: r.e.name, role: "empleado", modules: {} }, me.email); ok.push(r); }
+      catch (err) { failed.push(`${r.e.name}: ${err.message}`); }
+    }
+    setCreated((c) => [...c, ...ok]);
+    setLog(`Accesos creados: ${ok.length}.${failed.length ? ` Con error: ${failed.join("; ")}` : ""}`);
+    setBusy(false);
+    onChanged();
+  };
+
+  const invite = async (list) => {
+    if (!window.confirm(`Se enviará un correo de invitación a ${list.length} persona(s) para crear su contraseña e ingresar. ¿Continuar?`)) return;
+    setBusy(true); setError(null);
+    let sent = 0; const failed = [];
+    for (const r of list) {
+      try { await sendMemberInvite(r.email); sent += 1; }
+      catch (err) { failed.push(`${r.e.name}: ${err.message}`); }
+    }
+    setLog(`Invitaciones enviadas: ${sent}.${failed.length ? ` Con error: ${failed.join("; ")}` : ""}`);
+    setBusy(false);
+  };
+
+  return (
+    <div className="admin-member-form">
+      <div className="admin-form-header">
+        <h2>Accesos de colaboradores</h2>
+        <button type="button" className="admin-link-button" onClick={onClose}>Cerrar</button>
+      </div>
+      <p className="admin-note">Crea un acceso con rol <b>Empleado</b> para cada colaborador activo de People: solo ve <b>Mis solicitudes</b> con sus propios datos. Se usa el correo corporativo; si no tiene, el personal o el de Deel. Las invitaciones se envían en un paso aparte.</p>
+      {error && <div className="board-doc-error" role="alert">{error}</div>}
+      {log && <div className="admin-notice" role="status">{log}</div>}
+      {!employees ? <div className="admin-empty">Cargando…</div> : (
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead><tr><th /><th>Colaborador</th><th>Correo de acceso</th><th>Estado</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.e.id}>
+                  <td>{r.email && !r.existing && <input type="checkbox" checked={Boolean(selected[r.e.id])} onChange={(ev) => setSelected((x) => ({ ...x, [r.e.id]: ev.target.checked }))} aria-label={`Crear acceso para ${r.e.name}`} />}</td>
+                  <td>{r.e.name}</td>
+                  <td>{r.email || <span className="admin-member-email">Sin correo válido en su ficha</span>}</td>
+                  <td>{r.existing ? <span className={`admin-role-badge role-${r.existing.role}`}>Ya es miembro · {roleName(r.existing.role)}</span> : r.email ? "Por crear" : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="admin-form-actions">
+        <button className="admin-primary-button" disabled={busy || !chosen.length} onClick={create}>Crear {chosen.length} accesos</button>
+        {created.length > 0 && <button className="people-secondary-button" disabled={busy} onClick={() => invite(created)}>Enviar invitación a los {created.length} creados</button>}
+      </div>
+    </div>
+  );
+}
+
 function MembersView() {
   const me = useMember();
   const [members, setMembers] = useState(null);
@@ -126,6 +221,7 @@ function MembersView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [bulk, setBulk] = useState(false);
 
   const notify = async (email) => {
     try {
@@ -210,10 +306,12 @@ function MembersView() {
           <div className="admin-toolbar">
             <input className="admin-search" type="search" placeholder="Buscar por correo, nombre o rol"
               value={search} onChange={(event) => setSearch(event.target.value)} />
+            <button className="people-secondary-button" onClick={() => setBulk(true)}>Accesos de colaboradores</button>
             <button className="admin-primary-button" onClick={() => setEditing({ member: { ...emptyMember }, isNew: true })}>
               + Agregar miembro
             </button>
           </div>
+          {bulk && <CollaboratorAccess members={members || []} me={me} onClose={() => setBulk(false)} onChanged={load} />}
 
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -242,7 +340,8 @@ function MembersView() {
                             </span>
                           ))}
                           {member.role === "super_admin" && <span className="admin-access-chip is-edit">Miembros · Administrar</span>}
-                          {!accessSummary(member).length && <span className="admin-member-email">Sin módulos</span>}
+                          {member.role === "empleado" && <span className="admin-access-chip is-view">Mis solicitudes</span>}
+                          {!accessSummary(member).length && member.role !== "empleado" && <span className="admin-member-email">Sin módulos</span>}
                         </div>
                       </td>
                       <td className="admin-row-actions">

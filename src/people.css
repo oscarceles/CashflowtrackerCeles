@@ -381,3 +381,10 @@ img.people-avatar.is-photo { object-fit: cover; background: #eef1f5; }
 .esop-bar span { display: block; height: 100%; }
 .esop-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: -10px; margin-bottom: 18px; color: #647084; font-size: 12px; }
 .esop-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
+.people-modal.esop-modal-wide { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.esop-doc-text { margin: 12px 0; padding: 16px 18px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfcfe; color: #0f172a; font-family: Georgia, "Times New Roman", serif; font-size: 14px; line-height: 1.55; white-space: pre-wrap; max-height: 340px; overflow-y: auto; }
+.esop-agree { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 12px; font-size: 13.5px; }
+.esop-sign { max-width: 560px; }
+.esop-sign-canvas { display: block; width: 100%; height: 160px; border: 1px dashed #94a3b8; border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; }
+.esop-sign-foot { display: flex; justify-content: space-between; margin-top: 4px; color: #647084; font-size: 12px; }
+.esop-portal-form { max-width: 820px; }

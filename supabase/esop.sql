@@ -1,5 +1,5 @@
 -- ESOP: pool status (Board) and stock option purchase requests (People).
--- Run after people.sql and board.sql. Safe to re-run.
+-- Run after people.sql, board.sql and security-hardening.sql. Safe to re-run.
 --
 -- Flow: a People editor registers a request for a collaborator's vested grant (cliff reached,
 -- not expired) -> approve (fixes price and amount) -> payment:
@@ -56,6 +56,22 @@ create table if not exists public.esop_installments (
   unique (request_id, n)
 );
 
+-- Vesting: nothing before the cliff; from the cliff date on, 1/48 of the grant per month for
+-- 4 years (the first portion on the cliff date, one more on the same day of each following month).
+-- Whole shares only. Only active stock options vest for purchase.
+create or replace function public.esop_vested_units(g public.people_equity_grants, on_date date default current_date)
+returns numeric
+language sql
+stable
+set search_path = ''
+as $$
+  select case
+    when g.grant_type <> 'Stock options' or g.status <> 'Active' or g.cliff_date is null or on_date < g.cliff_date then 0
+    else floor(g.units * least(48, (extract(year from age(on_date, g.cliff_date)) * 12
+                                    + extract(month from age(on_date, g.cliff_date)))::int + 1) / 48.0)
+  end;
+$$;
+
 -- Validation: only vested, active stock options, never more units than are left on the grant.
 create or replace function public.esop_request_validate()
 returns trigger
@@ -72,6 +88,11 @@ begin
     if g.grant_type <> 'Stock options' then raise exception 'Solo se pueden comprar stock options (esta asignación es %).', g.grant_type; end if;
     if g.status <> 'Active' then raise exception 'La asignación no está activa.'; end if;
     if g.cliff_date is null or g.cliff_date > current_date then raise exception 'Las opciones aún no cumplen el cliff (%).', coalesce(to_char(g.cliff_date, 'YYYY-MM-DD'), 'sin fecha'); end if;
+    select coalesce(sum(units), 0) into used from public.esop_requests
+      where grant_id = new.grant_id and status in ('requested', 'approved', 'paid');
+    if used + new.units > public.esop_vested_units(g) then
+      raise exception 'Hoy hay % acciones vestidas disponibles para comprar en esta asignación.', greatest(0, public.esop_vested_units(g) - used);
+    end if;
     if g.expiration_date is not null and g.expiration_date < current_date then raise exception 'Las opciones vencieron el %.', g.expiration_date; end if;
     if new.payment_method = 'transfer' then new.installments := 1; end if;
     if new.installments > s.max_installments then raise exception 'Máximo % cuotas.', s.max_installments; end if;
@@ -174,14 +195,15 @@ end;
 $$;
 revoke all on function public.esop_remove_from_drafts(uuid) from public, anon, authenticated;
 
--- Status changes (People editors only).
-create or replace function public.esop_request_action(req uuid, action text, note text default null, paid_on date default null, reference text default null)
+-- Status changes (People editors only). The price per share is set on each purchase when it is approved.
+drop function if exists public.esop_request_action(uuid, text, text, date, text);
+create or replace function public.esop_request_action(req uuid, action text, note text default null, paid_on date default null, reference text default null, price_in numeric default null)
 returns public.esop_requests
 language plpgsql
 security definer
 set search_path = ''
 as $$
-declare r public.esop_requests; g public.people_equity_grants; s public.esop_settings; v_price numeric; v_amt numeric; part numeric; k int;
+declare r public.esop_requests; v_price numeric; v_amt numeric; part numeric; k int;
   me text := public.current_member_email();
 begin
   if public.module_access('people') is distinct from 'edit' then raise exception 'No tienes permiso para gestionar compras del ESOP.'; end if;
@@ -190,10 +212,8 @@ begin
 
   if action = 'approve' then
     if r.status <> 'requested' then raise exception 'Solo se puede aprobar una solicitud pendiente.'; end if;
-    select * into g from public.people_equity_grants where id = r.grant_id;
-    select * into s from public.esop_settings where id = 1;
-    v_price := coalesce(g.exercise_price, s.exercise_price);
-    if v_price is null then raise exception 'Define el precio de ejercicio en Board > ESOP antes de aprobar.'; end if;
+    v_price := price_in;
+    if v_price is null or v_price <= 0 then raise exception 'Indica el precio por acción de esta compra.'; end if;
     v_amt := round(r.units * v_price, 2);
     update public.esop_requests set status = 'approved', price = v_price, amount = v_amt, decided_at = now(), decided_by = me,
       decision_note = note, updated_by = me where id = req returning * into r;
@@ -228,8 +248,8 @@ begin
   return r;
 end;
 $$;
-revoke all on function public.esop_request_action(uuid, text, text, date, text) from public, anon;
-grant execute on function public.esop_request_action(uuid, text, text, date, text) to authenticated;
+revoke all on function public.esop_request_action(uuid, text, text, date, text, numeric) from public, anon;
+grant execute on function public.esop_request_action(uuid, text, text, date, text, numeric) to authenticated;
 
 -- Board > ESOP: pool status and one row per grant (readable with Board or People access).
 create or replace function public.esop_overview()
@@ -243,7 +263,7 @@ as $$
     'settings', (select to_jsonb(s) from public.esop_settings s where id = 1),
     'grants', coalesce((
       select jsonb_agg(jsonb_build_object(
-        'id', g.id, 'holder', e.name, 'active', e.active, 'grant_type', g.grant_type, 'units', g.units,
+        'id', g.id, 'employee_id', g.employee_id, 'holder', e.name, 'active', e.active, 'vested', public.esop_vested_units(g), 'grant_type', g.grant_type, 'units', g.units,
         'vesting_start', g.vesting_start, 'cliff_date', g.cliff_date, 'expiration_date', g.expiration_date,
         'status', g.status, 'signed', g.signed, 'exercise_price', g.exercise_price,
         'bought', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status = 'paid'), 0),
@@ -283,3 +303,134 @@ revoke all on table public.esop_settings, public.esop_requests, public.esop_inst
 revoke insert, delete on table public.esop_settings from authenticated;
 revoke update, delete on table public.esop_requests from authenticated;
 revoke insert, update, delete on table public.esop_installments from authenticated;
+
+-- ===================== Signed request form and self-service portal =====================
+-- Every request carries the form the collaborator filled in and signed electronically:
+-- the exact text shown, a drawn signature (PNG data URL), the typed name and ID, and audit data
+-- (signer account, time, IP and browser) plus a SHA-256 of the text, so later changes are detectable.
+alter table public.esop_requests
+  add column if not exists channel text not null default 'people' check (channel in ('people', 'self')),
+  add column if not exists signer_name text,
+  add column if not exists signer_id_number text,
+  add column if not exists form_text text,
+  add column if not exists form_hash text,
+  add column if not exists signature text check (signature is null or (signature like 'data:image/png;base64,%' and length(signature) < 400000)),
+  add column if not exists signed_at timestamptz,
+  add column if not exists signed_by text,
+  add column if not exists signed_ip text,
+  add column if not exists signed_user_agent text;
+
+-- Members whose role is only the self-service portal ("Empleado").
+alter table public.allowed_users drop constraint if exists allowed_users_role_check;
+alter table public.allowed_users add constraint allowed_users_role_check
+  check (role in ('super_admin', 'admin', 'colaborador', 'board_member', 'empleado'));
+
+-- The People record (active) of the signed-in member, matched by any of its emails.
+create or replace function public.self_employee_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select e.id from public.people_employees e
+  where e.active and public.current_member_email() <> ''
+    and exists (select 1 from public.allowed_users a where a.email = public.current_member_email())
+    and public.current_member_email() in (lower(trim(coalesce(e.work_email, ''))), lower(trim(coalesce(e.personal_email, ''))), lower(trim(coalesce(e.deel_email, ''))))
+  order by e.start_date desc nulls last
+  limit 1;
+$$;
+revoke all on function public.self_employee_id() from public, anon;
+grant execute on function public.self_employee_id() to authenticated;
+
+-- Portal data: my profile, my grants (with vesting) and my requests. Nothing about anyone else.
+create or replace function public.esop_self()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with me as (select public.self_employee_id() as id)
+  select case when (select id from me) is null then null else jsonb_build_object(
+    'employee', (select jsonb_build_object('id', e.id, 'name', e.name, 'legal_name', e.legal_name, 'role_title', e.role_title,
+                   'id_number', (select p.id_number from public.people_private p where p.employee_id = e.id))
+                 from public.people_employees e where e.id = (select id from me)),
+    'settings', (select jsonb_build_object('max_installments', s.max_installments, 'payment_instructions', s.payment_instructions) from public.esop_settings s where id = 1),
+    'grants', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', g.id, 'grant_type', g.grant_type, 'units', g.units, 'vesting_start', g.vesting_start, 'cliff_date', g.cliff_date,
+        'expiration_date', g.expiration_date, 'status', g.status, 'signed', g.signed, 'vested', public.esop_vested_units(g),
+        'used', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status in ('requested', 'approved', 'paid')), 0),
+        'bought', coalesce((select sum(units) from public.esop_requests r where r.grant_id = g.id and r.status = 'paid'), 0)
+      ) order by g.vesting_start) from public.people_equity_grants g where g.employee_id = (select id from me)), '[]'::jsonb),
+    'requests', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', r.id, 'grant_id', r.grant_id, 'units', r.units, 'price', r.price, 'amount', r.amount, 'payment_method', r.payment_method,
+        'installments', r.installments, 'status', r.status, 'requested_at', r.requested_at, 'decision_note', r.decision_note,
+        'paid_at', r.paid_at, 'signed_at', r.signed_at,
+        'installments_paid', (select count(*) from public.esop_installments i where i.request_id = r.id and i.paid)
+      ) order by r.requested_at desc) from public.esop_requests r where r.employee_id = (select id from me)), '[]'::jsonb)
+  ) end;
+$$;
+revoke all on function public.esop_self() from public, anon;
+grant execute on function public.esop_self() to authenticated;
+
+-- Creates a signed request. Allowed for the collaborator on their own grant (portal) or for a
+-- People editor on behalf of a collaborator who signs on the editor's device.
+create or replace function public.esop_submit_request(
+  p_grant uuid, p_units numeric, p_method text, p_installments int,
+  p_signer_name text, p_signer_id text, p_form_text text, p_signature text, p_notes text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare g public.people_equity_grants; mine uuid := public.self_employee_id(); is_editor boolean := public.module_access('people') = 'edit';
+  hdr jsonb := coalesce(nullif(current_setting('request.headers', true), '')::jsonb, '{}'::jsonb); new_id uuid;
+begin
+  select * into g from public.people_equity_grants where id = p_grant;
+  if g.id is null then raise exception 'La asignación no existe.'; end if;
+  if not is_editor and (mine is null or g.employee_id <> mine) then raise exception 'Solo puedes solicitar la compra de tus propias opciones.'; end if;
+  if coalesce(trim(p_signer_name), '') = '' or coalesce(trim(p_signer_id), '') = '' then raise exception 'Escribe tu nombre completo y tu documento de identidad.'; end if;
+  if coalesce(p_signature, '') not like 'data:image/png;base64,%' or length(p_signature) < 1500 then raise exception 'Falta la firma.'; end if;
+  if coalesce(trim(p_form_text), '') = '' then raise exception 'Falta el texto del formato.'; end if;
+  insert into public.esop_requests (grant_id, employee_id, units, payment_method, installments, notes, channel,
+    signer_name, signer_id_number, form_text, form_hash, signature, signed_at, signed_by, signed_ip, signed_user_agent)
+  values (g.id, g.employee_id, p_units, p_method, coalesce(p_installments, 1), nullif(trim(p_notes), ''),
+    case when mine is not null and g.employee_id = mine then 'self' else 'people' end,
+    trim(p_signer_name), trim(p_signer_id), p_form_text,
+    encode(extensions.digest(convert_to(p_form_text, 'UTF8'), 'sha256'), 'hex'), p_signature, now(),
+    public.current_member_email(), split_part(coalesce(hdr ->> 'x-forwarded-for', hdr ->> 'x-real-ip', ''), ',', 1), left(hdr ->> 'user-agent', 300))
+  returning id into new_id;
+  return new_id;
+end;
+$$;
+revoke all on function public.esop_submit_request(uuid, numeric, text, int, text, text, text, text, text) from public, anon;
+grant execute on function public.esop_submit_request(uuid, numeric, text, int, text, text, text, text, text) to authenticated;
+
+-- The signed form of one request (People viewers, or the collaborator who owns it).
+create or replace function public.esop_request_document(req uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object('id', r.id, 'employee', e.name, 'units', r.units, 'payment_method', r.payment_method, 'installments', r.installments,
+    'status', r.status, 'price', r.price, 'amount', r.amount, 'signer_name', r.signer_name, 'signer_id_number', r.signer_id_number,
+    'form_text', r.form_text, 'form_hash', r.form_hash, 'signature', r.signature, 'signed_at', r.signed_at, 'signed_by', r.signed_by,
+    'signed_ip', r.signed_ip, 'signed_user_agent', r.signed_user_agent, 'channel', r.channel,
+    'hash_ok', r.form_text is not null and r.form_hash = encode(extensions.digest(convert_to(r.form_text, 'UTF8'), 'sha256'), 'hex'))
+  from public.esop_requests r join public.people_employees e on e.id = r.employee_id
+  where r.id = req and (public.module_access('people') is not null or r.employee_id = public.self_employee_id());
+$$;
+revoke all on function public.esop_request_document(uuid) from public, anon;
+grant execute on function public.esop_request_document(uuid) to authenticated;
+
+-- Requests are created only through esop_submit_request (signed form), and the signature and
+-- form are only read through esop_request_document.
+drop policy if exists "People editors create ESOP requests" on public.esop_requests;
+revoke insert on table public.esop_requests from authenticated;
+revoke select on table public.esop_requests from authenticated;
+grant select (id, grant_id, employee_id, units, price, amount, payment_method, installments, status, notes, requested_at, requested_by,
+  decided_at, decided_by, decision_note, paid_at, payment_reference, updated_at, updated_by, channel, signer_name, signed_at, signed_by)
+  on table public.esop_requests to authenticated;
