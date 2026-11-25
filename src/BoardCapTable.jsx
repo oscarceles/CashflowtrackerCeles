@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 
-const SHARE_CLASSES = ["Common", "Series A Preferred", "Seed Preferred", "SAFE", "Option pool (granted)", "Option pool (available)", "Warrants", "Otra"];
+const SHARE_CLASSES = ["Common", "Series A-1 Preferred", "Series A-2 Preferred", "Series A-3 Preferred", "Series A-4 Preferred", "Series A-5 Preferred", "Series A Preferred", "Seed Preferred", "SAFE", "Option pool (granted)", "Option pool (available)", "Warrants", "Otra"];
 
 const fmtShares = (n) => Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 4 });
 const fmtPct = (n) => `${(n * 100).toFixed(2)}%`;
