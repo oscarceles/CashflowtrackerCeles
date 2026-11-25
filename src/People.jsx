@@ -10,6 +10,7 @@ import {
   daysBetween, segmentAmount, buildLiquidationSegments, exitMonthDays, DEEL_HEADER, buildDeelRows,
 } from "./peopleUtils";
 import DirectoryView, { PersonAvatar } from "./PeopleDirectory";
+import EsopView from "./PeopleEsop";
 
 /* ============================ data ============================ */
 
@@ -436,7 +437,7 @@ function AdjustmentsEditor({ line, period, editable, onSave, onClose }) {
   const save = () => {
     if (items.some((a) => a.currency === "COP") && !fx) return setError("Define la TRM de la nómina para convertir novedades en COP.");
     if (items.some((a) => !num(a.amount))) return setError("Cada novedad necesita un monto.");
-    onSave(items.map((a) => ({ id: a.id || crypto.randomUUID(), type: a.type, amount: num(a.amount), currency: a.currency, usd: toUsd(a), note: (a.note || "").slice(0, 200) })));
+    onSave(items.map((a) => ({ id: a.id || crypto.randomUUID(), type: a.type, amount: num(a.amount), currency: a.currency, usd: toUsd(a), note: (a.note || "").slice(0, 200), ...(a.esop_installment ? { esop_installment: a.esop_installment } : {}) })));
   };
 
   return (
@@ -949,6 +950,7 @@ const SECTIONS = [
   { id: "reports", label: "Reportes", icon: "▧", title: "Reportes de nómina", text: "KPIs, evolución mensual y distribución por área." },
   { id: "monthly", label: "Payroll mensual", icon: "☰", title: "Payroll mes a mes", text: "Pago por persona y mes, con filtros de año, área y tipo." },
   { id: "calc", label: "Cálculo de nómina", icon: "⊞", title: "Cálculo de nómina", text: "Prepara la próxima nómina: personas, días, prima y novedades." },
+  { id: "esop", label: "Compra de acciones ESOP", icon: "◔", title: "Compra de acciones ESOP", text: "Solicitudes de los colaboradores para comprar sus stock options, con pago por deducción de nómina o transferencia a Celes." },
 ];
 
 export default function PeopleWorkspace({ editable }) {
@@ -981,6 +983,7 @@ export default function PeopleWorkspace({ editable }) {
             {section === "directory" && <DirectoryView employees={data.employees} privates={data.privates} grants={data.grants} documents={data.documents} photos={data.photos} lines={data.lines} periods={data.periods} editable={editable} patchLocal={data.patchLocal} />}
             {section === "reports" && <ReportsView periods={data.periods} lines={data.lines} employees={data.employees} />}
             {section === "monthly" && <MonthlyPayrollView periods={data.periods} lines={data.lines} />}
+            {section === "esop" && <EsopView employees={data.employees} grants={data.grants} editable={editable} reloadPeople={data.reload} />}
             {section === "calc" && <PayrollCalcView periods={data.periods} lines={data.lines} employees={data.employees} photos={data.photos} editable={editable} patchLocal={data.patchLocal} reload={data.reload} />}
           </>
         )}

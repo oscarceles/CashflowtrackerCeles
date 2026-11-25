@@ -13,6 +13,7 @@ import PdfReader from "./PdfReader";
 import UserMenu from "./UserMenu";
 import PeopleWorkspace from "./People";
 import CapTableView from "./BoardCapTable";
+import EsopBoardView from "./BoardEsop";
 import LocalEntityView from "./BoardEntities";
 import FinancialsTool from "./Consolidation";
 import KpisView from "./BoardKpis";
@@ -1605,6 +1606,9 @@ function BoardWorkspace({ editable }) {
         <button className={`board-section-link${section === "cap-table" ? " is-active" : ""}`} aria-current={section === "cap-table" ? "page" : undefined} onClick={() => setSection("cap-table")}>
           <span className="board-section-icon" aria-hidden="true">◔</span> Cap Table
         </button>
+        <button className={`board-section-link${section === "esop" ? " is-active" : ""}`} aria-current={section === "esop" ? "page" : undefined} onClick={() => setSection("esop")}>
+          <span className="board-section-icon" aria-hidden="true">◑</span> ESOP
+        </button>
       </aside>
 
       <div className="board-section-content">
@@ -1664,6 +1668,8 @@ function BoardWorkspace({ editable }) {
           <SeriesATasksView editable={editable} />
         ) : section === "cap-table" ? (
           <CapTableView editable={editable} />
+        ) : section === "esop" ? (
+          <EsopBoardView editable={editable} />
         ) : section === "consolidated-financials" ? (
           <FinancialsTool editable={editable} />
         ) : section === "consolidated-kpis" ? (

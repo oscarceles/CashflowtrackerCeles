@@ -362,3 +362,22 @@ img.people-avatar.is-photo { object-fit: cover; background: #eef1f5; }
 .people-doc-kind.is-stock { color: #4a3aa7; background: #efedfb; }
 .people-doc-kind.is-deel { color: #1746d1; background: #eef3ff; }
 .people-doc-kind.is-other { color: #40516a; background: #f1f4f8; }
+
+/* ---------- ESOP (People > Compra de acciones ESOP, Board > ESOP) ---------- */
+.esop-title { margin: 22px 0 10px; color: #0f172a; font-size: 16px; font-weight: 650; }
+.esop-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.esop-toolbar .people-secondary-button.is-active { border-color: #1d4ed8; color: #1d4ed8; background: #eef4ff; }
+.esop-kpi-small { font-size: 17px; }
+.esop-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+.esop-wide { grid-column: 1 / -1; }
+.esop-methods { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; }
+.esop-methods legend { padding: 0 4px; color: #647084; font-size: 11px; font-weight: 650; }
+.esop-estimate { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: #f4f7fc; color: #0f172a; font-size: 13px; }
+.esop-estimate small { color: #647084; }
+.esop-status { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; background: #f4f7fc; color: #0f172a; font-size: 13.5px; }
+.esop-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; margin: 8px 0 18px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.esop-settings .esop-wide { grid-column: 1 / -1; }
+.esop-bar { display: flex; height: 12px; margin: 4px 0 18px; overflow: hidden; border-radius: 6px; background: #e2e8f0; }
+.esop-bar span { display: block; height: 100%; }
+.esop-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: -10px; margin-bottom: 18px; color: #647084; font-size: 12px; }
+.esop-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }

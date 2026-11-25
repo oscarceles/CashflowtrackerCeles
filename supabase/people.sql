@@ -194,6 +194,8 @@ begin
     from public.people_employees e
     where e.active and (e.end_date is null or e.end_date >= make_date(next_year, next_month, 1));
   end if;
+  -- ESOP purchases by payroll deduction: installments kept in this payroll are paid (see esop.sql).
+  perform public.esop_payroll_on_close(period);
   return next_id;
 end;
 $$;

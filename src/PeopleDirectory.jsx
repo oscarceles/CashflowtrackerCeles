@@ -167,7 +167,7 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
   const [error, setError] = useState(null);
   const save = async () => {
     setError(null);
-    const row = { employee_id: employeeId, units: num(draft.units), vesting_start: draft.vesting_start || null, cliff_date: draft.cliff_date || null, expiration_date: draft.expiration_date || null, status: draft.status || "Active", signed: Boolean(draft.signed) };
+    const row = { employee_id: employeeId, grant_type: draft.grant_type || "Stock options", units: num(draft.units), vesting_start: draft.vesting_start || null, cliff_date: draft.cliff_date || null, expiration_date: draft.expiration_date || null, status: draft.status || "Active", signed: Boolean(draft.signed) };
     const query = draft.id ? supabase.from("people_equity_grants").update(row).eq("id", draft.id) : supabase.from("people_equity_grants").insert(row);
     const { data, error: err } = await query.select().single();
     if (err) return setError(err.message);
@@ -183,12 +183,13 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
   return (
     <div>
       <table className="people-table">
-        <thead><tr><th className="num">Unidades</th><th>Inicio vesting</th><th>Cliff</th><th>Vencimiento</th><th>Firmado</th><th>Estado</th><th /></tr></thead>
+        <thead><tr><th>Tipo</th><th className="num">Unidades</th><th>Inicio vesting</th><th>Cliff</th><th>Vencimiento</th><th>Firmado</th><th>Estado</th><th /></tr></thead>
         <tbody>
           {grants.map((g) => {
             const stage = grantStage(g);
             return (
               <tr key={g.id}>
+                <td>{g.grant_type || "Stock options"}</td>
                 <td className="num">{num(g.units).toLocaleString("es-CO")}</td>
                 <td>{fmtDate(g.vesting_start)}</td><td>{fmtDate(g.cliff_date)}</td><td>{fmtDate(g.expiration_date)}</td>
                 <td>{g.signed ? "Sí" : "No"}</td>
@@ -200,11 +201,12 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
               </tr>
             );
           })}
-          {!grants.length && <tr><td colSpan={7} className="admin-empty">Sin stock options.</td></tr>}
+          {!grants.length && <tr><td colSpan={8} className="admin-empty">Sin stock options.</td></tr>}
         </tbody>
       </table>
       {draft && (
         <div className="people-inline-form">
+          <label className="admin-field"><span>Tipo</span><select value={draft.grant_type || "Stock options"} onChange={(e) => setDraft({ ...draft, grant_type: e.target.value })}><option>Stock options</option><option>Restricted stock</option></select></label>
           <label className="admin-field"><span>Unidades</span><input type="number" value={draft.units ?? ""} onChange={(e) => setDraft({ ...draft, units: e.target.value })} /></label>
           <label className="admin-field"><span>Inicio vesting</span><input type="date" value={draft.vesting_start || ""} onChange={(e) => setDraft({ ...draft, vesting_start: e.target.value })} /></label>
           <label className="admin-field"><span>Cliff</span><input type="date" value={draft.cliff_date || ""} onChange={(e) => setDraft({ ...draft, cliff_date: e.target.value })} /></label>
@@ -216,7 +218,7 @@ function GrantsEditor({ employeeId, grants, editable, patchLocal }) {
       )}
       {error && <div className="board-doc-error" role="alert">{error}</div>}
       {editable && !draft && (
-        <button className="people-secondary-button people-align-start" onClick={() => setDraft({ units: "", vesting_start: "", cliff_date: "", expiration_date: "", signed: false, status: "Active" })}>
+        <button className="people-secondary-button people-align-start" onClick={() => setDraft({ grant_type: "Stock options", units: "", vesting_start: "", cliff_date: "", expiration_date: "", signed: false, status: "Active" })}>
           + Agregar stock options
         </button>
       )}
